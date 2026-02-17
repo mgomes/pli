@@ -370,6 +370,9 @@ func (c *PlexClient) FetchSeasons(ctx context.Context, showID string) ([]PlexSea
 
 	seasons := make([]PlexSeason, 0, len(container.Directories))
 	for _, d := range container.Directories {
+		if normalizeType(d.Type) != "season" {
+			continue
+		}
 		seasonID := ratingKeyFromDirectory(d)
 		if seasonID == "" {
 			continue

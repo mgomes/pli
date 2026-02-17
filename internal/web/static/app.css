@@ -323,6 +323,11 @@ body {
   color: hsl(var(--muted-foreground));
 }
 
+.badge.in-progress {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(38 80% 65%);
+}
+
 .badge.next {
   background: hsl(var(--primary) / 0.15);
   color: hsl(38 90% 64%);
@@ -337,6 +342,7 @@ body {
 }
 
 .movie-card {
+  cursor: pointer;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
@@ -352,11 +358,34 @@ body {
 }
 
 .movie-card-cover {
+  position: relative;
   width: 100%;
   aspect-ratio: 2 / 3;
   border-radius: 8px;
   overflow: hidden;
   background: hsl(var(--muted));
+}
+
+.progress-bar {
+  height: 3px;
+  background: hsl(0 0% 100% / 0.1);
+  width: 100%;
+}
+
+.movie-card-cover .progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background: hsl(var(--primary));
+  border-radius: 0 1px 1px 0;
+}
+
+.progress-ring {
+  flex-shrink: 0;
 }
 
 .movie-card-year {
@@ -411,11 +440,18 @@ body {
 }
 
 .movie-detail-cover {
+  position: relative;
   width: 100%;
   aspect-ratio: 2 / 3;
   border-radius: 10px;
   overflow: hidden;
   background: hsl(var(--muted));
+}
+
+.movie-detail-cover .progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
 }
 
 .movie-detail-body {

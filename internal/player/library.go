@@ -27,6 +27,8 @@ type PlexMovie struct {
 	Title           string
 	Year            int64
 	Watched         bool
+	ViewOffset      int64
+	Duration        int64
 	AddedAt         string
 	CoverPath       string
 	Summary         string
@@ -34,7 +36,6 @@ type PlexMovie struct {
 	AudienceRating  string
 	ContentRating   string
 	Tagline         string
-	Duration        int64
 	Studio          string
 	Genres          []string
 	Directors       []string
@@ -69,6 +70,8 @@ type PlexEpisode struct {
 	EpisodeNumber int64
 	Title         string
 	Watched       bool
+	ViewOffset    int64
+	Duration      int64
 	AddedAt       string
 	CoverPath     string
 }
@@ -122,6 +125,7 @@ type browseVideo struct {
 	ParentIndex          int64  `xml:"parentIndex,attr"`
 	Index                int64  `xml:"index,attr"`
 	ViewCount            int64  `xml:"viewCount,attr"`
+	ViewOffset           int64  `xml:"viewOffset,attr"`
 	LeafCount            int64  `xml:"leafCount,attr"`
 	ViewedLeafCount      int64  `xml:"viewedLeafCount,attr"`
 	Year                 int64  `xml:"year,attr"`
@@ -241,6 +245,8 @@ func (c *PlexClient) FetchMovies(ctx context.Context) ([]PlexMovie, error) {
 				Title:          v.Title,
 				Year:           v.Year,
 				Watched:        v.ViewCount > 0,
+				ViewOffset:     v.ViewOffset,
+				Duration:       v.Duration,
 				AddedAt:        toRFC3339(v.AddedAt),
 				CoverPath:      firstNonEmpty(v.Thumb),
 				Summary:        strings.TrimSpace(v.Summary),
@@ -248,7 +254,6 @@ func (c *PlexClient) FetchMovies(ctx context.Context) ([]PlexMovie, error) {
 				AudienceRating: strings.TrimSpace(v.AudienceRating),
 				ContentRating:  strings.TrimSpace(v.ContentRating),
 				Tagline:        strings.TrimSpace(v.Tagline),
-				Duration:       v.Duration,
 				Studio:         strings.TrimSpace(v.Studio),
 				Genres:         genres,
 				Directors:      directors,
@@ -413,6 +418,8 @@ func (c *PlexClient) FetchEpisodes(ctx context.Context, seasonID string) ([]Plex
 			EpisodeNumber: v.Index,
 			Title:         v.Title,
 			Watched:       v.ViewCount > 0,
+			ViewOffset:    v.ViewOffset,
+			Duration:      v.Duration,
 			AddedAt:       toRFC3339(v.AddedAt),
 			CoverPath:     firstNonEmpty(v.Thumb, v.ParentThumb, v.GrandparentThumb),
 		})

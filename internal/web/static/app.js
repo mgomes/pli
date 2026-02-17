@@ -340,12 +340,13 @@ function renderMovies() {
         <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
           <div class="movie-card-cover">
             ${renderCover(movie.cover_url, movie.title)}
+            ${progressBar(movie.view_offset, movie.duration)}
           </div>
           <div class="movie-card-year">${movie.year}</div>
           <div class="movie-card-title">${escapeHtml(movie.title)}</div>
           <div class="movie-card-footer">
-            <span class="badge ${movie.watched ? "watched" : "unwatched"}">
-              ${movie.watched ? "Watched" : "Unwatched"}
+            <span class="badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
+              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
             </span>
             <button class="play-btn" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
               <i data-lucide="play"></i>
@@ -369,14 +370,16 @@ function renderMovies() {
   });
 }
 
-function openMovieDetail(movieID, options = {}) {
+async function openMovieDetail(movieID, options = {}) {
   const { historyMode = "push" } = options;
+  await loadMovies();
   const movie = state.movies.find((item) => item.id === movieID);
   if (!movie) {
     return;
   }
   state.selectedMovieId = movie.id;
-  setHeader(movie.title, `Released ${movie.year || "Unknown"} · ${movie.watched ? "Watched" : "Unwatched"}`);
+  const watchStatus = movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched";
+  setHeader(movie.title, `Released ${movie.year || "Unknown"} · ${watchStatus}`);
   renderMovieDetail(movie);
   if (historyMode !== "none") {
     setRoute({ section: "movies", movieId: movie.id }, historyMode);
@@ -462,7 +465,10 @@ function renderMovieDetail(movie) {
         Back to Movies
       </button>
       <div class="movie-detail-layout">
-        <div class="movie-detail-cover">${renderCover(movie.cover_url, movie.title)}</div>
+        <div class="movie-detail-cover">
+            ${renderCover(movie.cover_url, movie.title)}
+            ${progressBar(movie.view_offset, movie.duration)}
+          </div>
         <div class="movie-detail-body">
           <h2 class="movie-detail-title">${escapeHtml(movie.title)}</h2>
           ${movie.tagline ? `<p class="movie-detail-tagline">${escapeHtml(movie.tagline)}</p>` : ""}
@@ -563,11 +569,12 @@ function renderTV() {
                 (episode) => `
               <div class="episode-item">
                 <span class="episode-num">E${String(episode.episode_number).padStart(2, "0")}</span>
+                ${progressRing(episode.view_offset, episode.duration)}
                 <span class="episode-title">${escapeHtml(episode.title)}</span>
                 <div class="episode-badges">
                   ${episode.is_next_up ? '<span class="badge next">Next Up</span>' : ""}
-                  <span class="badge ${episode.watched ? "watched" : "unwatched"}">
-                    ${episode.watched ? "Watched" : "Unwatched"}
+                  <span class="badge ${episode.watched ? "watched" : episode.view_offset ? "in-progress" : "unwatched"}">
+                    ${episode.watched ? "Watched" : episode.view_offset ? "In Progress" : "Unwatched"}
                   </span>
                   <button class="play-btn" data-play-type="episode" data-play-id="${escapeHtml(episode.id)}" title="Play">
                     <i data-lucide="play"></i>
@@ -782,6 +789,23 @@ function drawIcons() {
   if (window.lucide && typeof window.lucide.createIcons === "function") {
     window.lucide.createIcons();
   }
+}
+
+function progressBar(viewOffset, duration) {
+  if (!viewOffset || !duration || duration <= 0) return "";
+  const pct = Math.min(100, Math.round((viewOffset / duration) * 100));
+  if (pct <= 0) return "";
+  return `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>`;
+}
+
+function progressRing(viewOffset, duration) {
+  if (!viewOffset || !duration || duration <= 0) return "";
+  const pct = Math.min(1, viewOffset / duration);
+  if (pct <= 0) return "";
+  const r = 6;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - pct);
+  return `<svg class="progress-ring" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="${r}" fill="none" stroke="hsl(0 0% 100% / 0.1)" stroke-width="2"/><circle cx="8" cy="8" r="${r}" fill="none" stroke="hsl(var(--primary))" stroke-width="2" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 8 8)"/></svg>`;
 }
 
 function escapeHtml(value) {

@@ -59,6 +59,8 @@ type movieItem struct {
 	Title           string   `json:"title"`
 	Year            int64    `json:"year"`
 	Watched         bool     `json:"watched"`
+	ViewOffset      int64    `json:"view_offset,omitempty"`
+	Duration        int64    `json:"duration,omitempty"`
 	AddedAt         string   `json:"added_at"`
 	CoverURL        string   `json:"cover_url"`
 	Summary         string   `json:"summary,omitempty"`
@@ -66,7 +68,6 @@ type movieItem struct {
 	AudienceRating  string   `json:"audience_rating,omitempty"`
 	ContentRating   string   `json:"content_rating,omitempty"`
 	Tagline         string   `json:"tagline,omitempty"`
-	Duration        int64    `json:"duration,omitempty"`
 	Studio          string   `json:"studio,omitempty"`
 	Genres          []string `json:"genres,omitempty"`
 	Directors       []string `json:"directors,omitempty"`
@@ -99,6 +100,8 @@ type tvEpisodeItem struct {
 	EpisodeNumber int64  `json:"episode_number"`
 	Title         string `json:"title"`
 	Watched       bool   `json:"watched"`
+	ViewOffset    int64  `json:"view_offset,omitempty"`
+	Duration      int64  `json:"duration,omitempty"`
 	IsNextUp      bool   `json:"is_next_up"`
 	AddedAt       string `json:"added_at"`
 }
@@ -378,6 +381,8 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 			Title:           row.Title,
 			Year:            row.Year,
 			Watched:         row.Watched,
+			ViewOffset:      row.ViewOffset,
+			Duration:        row.Duration,
 			AddedAt:         row.AddedAt,
 			CoverURL:        s.plexImageURL(row.CoverPath),
 			Summary:         row.Summary,
@@ -385,7 +390,6 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 			AudienceRating:  row.AudienceRating,
 			ContentRating:   row.ContentRating,
 			Tagline:         row.Tagline,
-			Duration:        row.Duration,
 			Studio:          row.Studio,
 			Genres:          row.Genres,
 			Directors:       row.Directors,
@@ -527,6 +531,8 @@ func (s *Server) handleTVEpisodes(w http.ResponseWriter, r *http.Request) {
 			EpisodeNumber: row.EpisodeNumber,
 			Title:         row.Title,
 			Watched:       row.Watched,
+			ViewOffset:    row.ViewOffset,
+			Duration:      row.Duration,
 			IsNextUp:      nextUpID != "" && row.ID == nextUpID,
 			AddedAt:       row.AddedAt,
 		})
@@ -656,6 +662,12 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		log.Printf("timeline report error for %s: %v", req.RatingKey, err)
 		writeError(w, http.StatusBadGateway, "timeline report failed")
 		return
+	}
+
+	if req.DurationMs > 0 && req.TimeMs > 0 && float64(req.TimeMs)/float64(req.DurationMs) >= 0.9 {
+		if err := plexClient.Scrobble(r.Context(), req.RatingKey); err != nil {
+			log.Printf("scrobble error for %s: %v", req.RatingKey, err)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

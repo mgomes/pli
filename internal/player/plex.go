@@ -111,7 +111,26 @@ func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*Plex
 }
 
 func (c *PlexClient) StreamURL(partKey string) string {
-	return fmt.Sprintf("%s%s?X-Plex-Token=%s", c.BaseURL, partKey, url.QueryEscape(c.Token))
+	baseURL, err := url.Parse(strings.TrimSpace(c.BaseURL))
+	if err != nil {
+		return ""
+	}
+
+	partURL, err := url.Parse(strings.TrimSpace(partKey))
+	if err != nil {
+		return ""
+	}
+
+	streamURL := baseURL.ResolveReference(partURL)
+	if c.Token != "" {
+		query := streamURL.Query()
+		if query.Get("X-Plex-Token") == "" {
+			query.Set("X-Plex-Token", c.Token)
+		}
+		streamURL.RawQuery = query.Encode()
+	}
+
+	return streamURL.String()
 }
 
 func (c *PlexClient) ReportTimeline(ctx context.Context, ratingKey string, timeMs, durationMs int64, state string) error {
@@ -189,7 +208,7 @@ type PlexPin struct {
 
 func (a *PlexAuth) CreatePin(ctx context.Context) (*PlexPin, error) {
 	form := url.Values{
-		"strong":                    {"true"},
+		"strong":                   {"true"},
 		"X-Plex-Product":           {a.Product},
 		"X-Plex-Client-Identifier": {a.ClientID},
 	}

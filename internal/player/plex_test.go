@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -63,4 +64,78 @@ func TestScrobbleChecksStatusCode(t *testing.T) {
 			t.Fatalf("expected Scrobble() to fail on non-2xx status")
 		}
 	})
+}
+
+func TestStreamURLBuildsValidURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseURL     string
+		partKey     string
+		token       string
+		wantPath    string
+		wantToken   string
+		wantQueryKV map[string]string
+	}{
+		{
+			name:      "relative path no query",
+			baseURL:   "http://127.0.0.1:32400",
+			partKey:   "/library/parts/123/file.mkv",
+			token:     "abc123",
+			wantPath:  "/library/parts/123/file.mkv",
+			wantToken: "abc123",
+		},
+		{
+			name:      "preserves existing query",
+			baseURL:   "http://127.0.0.1:32400",
+			partKey:   "/library/parts/123/file.mkv?download=1",
+			token:     "abc123",
+			wantPath:  "/library/parts/123/file.mkv",
+			wantToken: "abc123",
+			wantQueryKV: map[string]string{
+				"download": "1",
+			},
+		},
+		{
+			name:      "does not override existing token",
+			baseURL:   "http://127.0.0.1:32400",
+			partKey:   "/library/parts/123/file.mkv?X-Plex-Token=from-part",
+			token:     "from-client",
+			wantPath:  "/library/parts/123/file.mkv",
+			wantToken: "from-part",
+		},
+		{
+			name:      "absolute part url",
+			baseURL:   "http://127.0.0.1:32400",
+			partKey:   "https://plex.example.com/library/parts/123/file.mkv",
+			token:     "abc123",
+			wantPath:  "/library/parts/123/file.mkv",
+			wantToken: "abc123",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &PlexClient{
+				BaseURL: tc.baseURL,
+				Token:   tc.token,
+			}
+
+			raw := client.StreamURL(tc.partKey)
+			parsed, err := url.Parse(raw)
+			if err != nil {
+				t.Fatalf("StreamURL() returned invalid URL %q: %v", raw, err)
+			}
+			if parsed.Path != tc.wantPath {
+				t.Fatalf("path = %q, want %q", parsed.Path, tc.wantPath)
+			}
+			if got := parsed.Query().Get("X-Plex-Token"); got != tc.wantToken {
+				t.Fatalf("X-Plex-Token = %q, want %q", got, tc.wantToken)
+			}
+			for key, want := range tc.wantQueryKV {
+				if got := parsed.Query().Get(key); got != want {
+					t.Fatalf("query[%q] = %q, want %q", key, got, want)
+				}
+			}
+		})
+	}
 }

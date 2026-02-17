@@ -34,9 +34,156 @@ const sectionMeta = {
 window.addEventListener("DOMContentLoaded", async () => {
   wireSectionNav();
   await loadConfig();
-  await switchSection("recently-added");
+  window.addEventListener("popstate", () => {
+    void navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
+  });
+  await navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
   startPlaybackPolling();
 });
+
+function parseRoute(pathname) {
+  const segments = pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (!segments.length || segments[0] === "recently-added") {
+    return { section: "recently-added" };
+  }
+
+  if (segments[0] === "movies") {
+    if (segments[1]) {
+      return { section: "movies", movieId: decodeURIComponent(segments[1]) };
+    }
+    return { section: "movies" };
+  }
+
+  if (segments[0] === "tv") {
+    if (segments[1] && segments[2] === "season" && segments[3]) {
+      return {
+        section: "tv",
+        showId: decodeURIComponent(segments[1]),
+        seasonId: decodeURIComponent(segments[3]),
+      };
+    }
+    if (segments[1]) {
+      return { section: "tv", showId: decodeURIComponent(segments[1]) };
+    }
+    return { section: "tv" };
+  }
+
+  if (segments[0] === "settings") {
+    return { section: "settings" };
+  }
+
+  return { section: "recently-added" };
+}
+
+function routePath(route) {
+  if (route.section === "movies") {
+    if (route.movieId) {
+      return `/movies/${encodeURIComponent(route.movieId)}`;
+    }
+    return "/movies";
+  }
+
+  if (route.section === "tv") {
+    if (route.showId && route.seasonId) {
+      return `/tv/${encodeURIComponent(route.showId)}/season/${encodeURIComponent(route.seasonId)}`;
+    }
+    if (route.showId) {
+      return `/tv/${encodeURIComponent(route.showId)}`;
+    }
+    return "/tv";
+  }
+
+  if (route.section === "settings") {
+    return "/settings";
+  }
+
+  return "/recently-added";
+}
+
+function setRoute(route, historyMode = "push") {
+  const path = routePath(route);
+  if (path === window.location.pathname) {
+    return;
+  }
+  if (historyMode === "replace") {
+    window.history.replaceState({}, "", path);
+    return;
+  }
+  window.history.pushState({}, "", path);
+}
+
+async function navigateToRoute(route, options = {}) {
+  const { historyMode = "push" } = options;
+  const section = route.section || "recently-added";
+
+  state.section = section;
+  setActiveButton(section);
+  setHeader(sectionMeta[section].title, sectionMeta[section].description);
+
+  if (section === "recently-added") {
+    await loadRecentlyAdded();
+    renderRecentlyAdded();
+    if (historyMode !== "none") {
+      setRoute({ section: "recently-added" }, historyMode);
+    }
+  }
+
+  if (section === "movies") {
+    state.selectedMovieId = null;
+    await loadMovies();
+    if (route.movieId && state.movies.some((movie) => movie.id === route.movieId)) {
+      openMovieDetail(route.movieId, { historyMode: "none" });
+    } else {
+      renderMovies();
+    }
+    if (historyMode !== "none") {
+      if (state.selectedMovieId) {
+        setRoute({ section: "movies", movieId: state.selectedMovieId }, historyMode);
+      } else {
+        setRoute({ section: "movies" }, historyMode);
+      }
+    }
+  }
+
+  if (section === "tv") {
+    await loadTVShows();
+    if (state.shows.length) {
+      if (route.showId && state.shows.some((show) => show.id === route.showId) && route.showId !== state.selectedShowId) {
+        await selectShow(route.showId);
+      }
+      if (
+        route.seasonId &&
+        state.seasons.some((season) => season.id === route.seasonId) &&
+        route.seasonId !== state.selectedSeasonId
+      ) {
+        await selectSeason(route.seasonId, false);
+      }
+    }
+    renderTV();
+    if (historyMode !== "none") {
+      if (state.selectedShowId && state.selectedSeasonId) {
+        setRoute({ section: "tv", showId: state.selectedShowId, seasonId: state.selectedSeasonId }, historyMode);
+      } else if (state.selectedShowId) {
+        setRoute({ section: "tv", showId: state.selectedShowId }, historyMode);
+      } else {
+        setRoute({ section: "tv" }, historyMode);
+      }
+    }
+  }
+
+  if (section === "settings") {
+    renderSettings();
+    if (historyMode !== "none") {
+      setRoute({ section: "settings" }, historyMode);
+    }
+  }
+
+  drawIcons();
+}
 
 function wireSectionNav() {
   document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
@@ -45,37 +192,9 @@ function wireSectionNav() {
       if (!section || section === state.section) {
         return;
       }
-      await switchSection(section);
+      await navigateToRoute({ section }, { historyMode: "push" });
     });
   });
-}
-
-async function switchSection(section) {
-  state.section = section;
-  setActiveButton(section);
-  setHeader(sectionMeta[section].title, sectionMeta[section].description);
-
-  if (section === "recently-added") {
-    await loadRecentlyAdded();
-    renderRecentlyAdded();
-  }
-
-  if (section === "movies") {
-    state.selectedMovieId = null;
-    await loadMovies();
-    renderMovies();
-  }
-
-  if (section === "tv") {
-    await loadTVShows();
-    renderTV();
-  }
-
-  if (section === "settings") {
-    renderSettings();
-  }
-
-  drawIcons();
 }
 
 function setActiveButton(section) {
@@ -239,7 +358,8 @@ function renderMovies() {
   });
 }
 
-function openMovieDetail(movieID) {
+function openMovieDetail(movieID, options = {}) {
+  const { historyMode = "push" } = options;
   const movie = state.movies.find((item) => item.id === movieID);
   if (!movie) {
     return;
@@ -247,6 +367,9 @@ function openMovieDetail(movieID) {
   state.selectedMovieId = movie.id;
   setHeader(movie.title, `Released ${movie.year || "Unknown"} · ${movie.watched ? "Watched" : "Unwatched"}`);
   renderMovieDetail(movie);
+  if (historyMode !== "none") {
+    setRoute({ section: "movies", movieId: movie.id }, historyMode);
+  }
   drawIcons();
 }
 
@@ -353,6 +476,7 @@ function renderMovieDetail(movie) {
     state.selectedMovieId = null;
     setHeader(sectionMeta.movies.title, sectionMeta.movies.description);
     renderMovies();
+    setRoute({ section: "movies" }, "push");
     drawIcons();
   });
 
@@ -457,6 +581,11 @@ function renderTV() {
       await selectShow(showId);
       renderTV();
       drawIcons();
+      if (state.selectedShowId && state.selectedSeasonId) {
+        setRoute({ section: "tv", showId: state.selectedShowId, seasonId: state.selectedSeasonId }, "push");
+      } else if (state.selectedShowId) {
+        setRoute({ section: "tv", showId: state.selectedShowId }, "push");
+      }
     });
   });
 
@@ -467,6 +596,9 @@ function renderTV() {
         return;
       }
       await selectSeason(seasonId);
+      if (state.selectedShowId && state.selectedSeasonId) {
+        setRoute({ section: "tv", showId: state.selectedShowId, seasonId: state.selectedSeasonId }, "push");
+      }
     });
   });
 

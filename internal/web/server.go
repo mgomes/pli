@@ -138,6 +138,12 @@ func (s *Server) router() http.Handler {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	r.Get("/", s.handleIndex)
+	r.Get("/recently-added", s.handleIndex)
+	r.Get("/movies", s.handleIndex)
+	r.Get("/movies/*", s.handleIndex)
+	r.Get("/tv", s.handleIndex)
+	r.Get("/tv/*", s.handleIndex)
+	r.Get("/settings", s.handleIndex)
 	r.Get("/healthz", s.handleHealth)
 
 	r.Route("/api", func(r chi.Router) {

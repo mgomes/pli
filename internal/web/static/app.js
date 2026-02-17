@@ -38,7 +38,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     void navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
   });
   await navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
-  startPlaybackPolling();
 });
 
 function parseRoute(pathname) {
@@ -824,7 +823,10 @@ async function putJSON(path, body) {
 
 async function playItem(type, id) {
   try {
-    await postJSON("/api/play", { type, id: String(id) });
+    const result = await postJSON("/api/play", { type, id: String(id) });
+    if (result.stream_url) {
+      window.location.href = "iina://weblink?url=" + encodeURIComponent(result.stream_url);
+    }
   } catch (err) {
     console.error("play failed:", err.message);
   }
@@ -843,53 +845,3 @@ function wirePlayButtons(container) {
   });
 }
 
-let playbackTimer = null;
-
-function startPlaybackPolling() {
-  pollPlayback();
-  playbackTimer = setInterval(pollPlayback, 5000);
-}
-
-async function pollPlayback() {
-  try {
-    const data = await fetchJSON("/api/playback");
-    renderNowPlaying(data);
-  } catch {
-    // Ignore polling errors.
-  }
-}
-
-function renderNowPlaying(data) {
-  const el = document.getElementById("now-playing");
-  if (!el) return;
-
-  if (!data.active) {
-    el.style.display = "none";
-    return;
-  }
-
-  const pct = data.progress ? Math.round(data.progress * 100) : 0;
-  const pos = formatTime(data.position_ms || 0);
-  const dur = formatTime(data.duration_ms || 0);
-
-  el.style.display = "flex";
-  el.innerHTML = `
-    <div class="now-playing-indicator"></div>
-    <span class="now-playing-title">${escapeHtml(data.title || "Playing")}</span>
-    <span class="now-playing-time">${pos} / ${dur}</span>
-    <div class="now-playing-progress">
-      <div class="now-playing-progress-fill" style="width:${pct}%"></div>
-    </div>
-  `;
-}
-
-function formatTime(ms) {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}

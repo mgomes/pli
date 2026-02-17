@@ -31,7 +31,6 @@ var uiFS embed.FS
 
 type Server struct {
 	queries  *db.Queries
-	player   *player.Manager
 	template *template.Template
 	staticFS http.Handler
 }
@@ -103,7 +102,7 @@ type tvEpisodeItem struct {
 	AddedAt       string `json:"added_at"`
 }
 
-func NewServer(queries *db.Queries, playerMgr *player.Manager) (*Server, error) {
+func NewServer(queries *db.Queries) (*Server, error) {
 	tmpl, err := template.ParseFS(uiFS, "templates/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
@@ -116,7 +115,6 @@ func NewServer(queries *db.Queries, playerMgr *player.Manager) (*Server, error) 
 
 	return &Server{
 		queries:  queries,
-		player:   playerMgr,
 		template: tmpl,
 		staticFS: http.FileServer(http.FS(staticSub)),
 	}, nil
@@ -159,7 +157,6 @@ func (s *Server) router() http.Handler {
 		r.Post("/plex/auth/start", s.handlePlexAuthStart)
 		r.Get("/plex/auth/poll/{pinID}", s.handlePlexAuthPoll)
 		r.Post("/play", s.handlePlay)
-		r.Get("/playback", s.handlePlayback)
 	})
 
 	r.Handle("/static/*", http.StripPrefix("/static/", s.staticFS))
@@ -610,20 +607,20 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.player.Play(r.Context(), req); err != nil {
-		if err.Error() == "a session is already active" {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "playing"})
-}
+	meta, err := plexClient.FetchMetadata(r.Context(), req.ID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 
-func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.player.State())
+	streamURL := plexClient.StreamURL(meta.PartKey)
+	writeJSON(w, http.StatusOK, map[string]string{"stream_url": streamURL})
 }
 
 func (s *Server) getCachedPayload(ctx context.Context, namespace, key string) ([]byte, bool) {

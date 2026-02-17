@@ -755,68 +755,6 @@ body {
   background: hsl(var(--primary) / 0.1);
 }
 
-/* ---- Now Playing ---- */
-
-.now-playing {
-  position: fixed;
-  bottom: 0;
-  left: var(--sidebar-width);
-  right: 0;
-  height: 48px;
-  background: hsl(var(--card));
-  border-top: 1px solid hsl(var(--border));
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0 1.25rem;
-  z-index: 50;
-}
-
-.now-playing-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: hsl(var(--primary));
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.now-playing-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.now-playing-time {
-  font-size: 0.75rem;
-  color: hsl(var(--muted-foreground));
-  white-space: nowrap;
-  margin-left: auto;
-}
-
-.now-playing-progress {
-  width: 120px;
-  height: 3px;
-  background: hsl(var(--muted));
-  border-radius: 999px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.now-playing-progress-fill {
-  height: 100%;
-  background: hsl(var(--primary));
-  border-radius: 999px;
-  transition: width 1s linear;
-}
-
 /* ---- Settings Form ---- */
 
 .settings-form {
@@ -1041,7 +979,4 @@ body {
     height: 54px;
   }
 
-  .now-playing {
-    left: 0;
-  }
 }

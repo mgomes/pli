@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mgomes/pli/internal/db"
-	"github.com/mgomes/pli/internal/player"
 	"github.com/mgomes/pli/internal/web"
 	_ "modernc.org/sqlite"
 )
@@ -82,17 +81,7 @@ func Run(ctx context.Context, addr, dbPath string) error {
 	}
 	defer database.Close()
 
-	configReader := func(key string) (string, error) {
-		cfg, err := queries.GetConfig(ctx, key)
-		if err != nil {
-			return "", err
-		}
-		return cfg.Value, nil
-	}
-
-	playerMgr := player.NewManager(configReader)
-
-	server, err := web.NewServer(queries, playerMgr)
+	server, err := web.NewServer(queries)
 	if err != nil {
 		return err
 	}
@@ -101,7 +90,6 @@ func Run(ctx context.Context, addr, dbPath string) error {
 
 	go func() {
 		<-ctx.Done()
-		playerMgr.Shutdown()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {

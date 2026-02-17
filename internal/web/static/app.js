@@ -825,7 +825,15 @@ async function playItem(type, id) {
   try {
     const result = await postJSON("/api/play", { type, id: String(id) });
     if (result.stream_url) {
-      window.location.href = "iina://weblink?url=" + encodeURIComponent(result.stream_url);
+      const streamUrl = new URL(result.stream_url);
+      if (result.rating_key) {
+        streamUrl.searchParams.set("X-Pli-Rating-Key", result.rating_key);
+      }
+      if (result.duration_ms) {
+        streamUrl.searchParams.set("X-Pli-Duration", String(result.duration_ms));
+      }
+      streamUrl.searchParams.set("X-Pli-Callback", window.location.origin + "/api/timeline");
+      window.location.href = "iina://weblink?url=" + encodeURIComponent(streamUrl.toString());
     }
   } catch (err) {
     console.error("play failed:", err.message);

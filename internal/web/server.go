@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -157,6 +158,8 @@ func (s *Server) router() http.Handler {
 		r.Post("/plex/auth/start", s.handlePlexAuthStart)
 		r.Get("/plex/auth/poll/{pinID}", s.handlePlexAuthPoll)
 		r.Post("/play", s.handlePlay)
+		r.Post("/timeline", s.handleTimeline)
+		r.Get("/sessions", s.handleSessions)
 	})
 
 	r.Handle("/static/*", http.StripPrefix("/static/", s.staticFS))
@@ -620,7 +623,73 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	streamURL := plexClient.StreamURL(meta.PartKey)
-	writeJSON(w, http.StatusOK, map[string]string{"stream_url": streamURL})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stream_url":  streamURL,
+		"rating_key":  req.ID,
+		"duration_ms": meta.Duration,
+	})
+}
+
+func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RatingKey  string `json:"rating_key"`
+		TimeMs     int64  `json:"time_ms"`
+		DurationMs int64  `json:"duration_ms"`
+		State      string `json:"state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RatingKey == "" || req.State == "" {
+		writeError(w, http.StatusBadRequest, "rating_key and state are required")
+		return
+	}
+
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	if err := plexClient.ReportTimeline(r.Context(), req.RatingKey, req.TimeMs, req.DurationMs, req.State); err != nil {
+		log.Printf("timeline report error for %s: %v", req.RatingKey, err)
+		writeError(w, http.StatusBadGateway, "timeline report failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	sessions, err := plexClient.FetchSessions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	type sessionItem struct {
+		Title      string `json:"title"`
+		RatingKey  string `json:"rating_key"`
+		SessionKey string `json:"session_key"`
+	}
+
+	items := make([]sessionItem, 0, len(sessions))
+	for _, s := range sessions {
+		items = append(items, sessionItem{
+			Title:      s.Title,
+			RatingKey:  s.RatingKey,
+			SessionKey: s.SessionKey,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": items})
 }
 
 func (s *Server) getCachedPayload(ctx context.Context, namespace, key string) ([]byte, bool) {

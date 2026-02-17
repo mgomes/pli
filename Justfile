@@ -20,3 +20,7 @@ build:
 # Refresh sqlc-generated query code.
 sqlc:
 	./bin/sqlc generate
+
+# Package the IINA plugin as an installable .iinaplgz file.
+iina-plugin:
+	/Applications/IINA.app/Contents/MacOS/iina-plugin pack iina-plugin

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type PlexClient struct {
@@ -24,8 +26,11 @@ type plexMediaContainer struct {
 }
 
 type plexVideo struct {
-	Title string      `xml:"title,attr"`
-	Media []plexMedia `xml:"Media"`
+	Title      string      `xml:"title,attr"`
+	RatingKey  string      `xml:"ratingKey,attr"`
+	SessionKey string      `xml:"sessionKey,attr"`
+	Duration   int64       `xml:"duration,attr"`
+	Media      []plexMedia `xml:"Media"`
 }
 
 type plexMedia struct {
@@ -37,8 +42,9 @@ type plexPart struct {
 }
 
 type PlexMetadata struct {
-	Title   string
-	PartKey string
+	Title    string
+	PartKey  string
+	Duration int64 // milliseconds
 }
 
 func (c *PlexClient) TestConnection(ctx context.Context) (string, error) {
@@ -105,8 +111,9 @@ func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*Plex
 	}
 
 	return &PlexMetadata{
-		Title:   mc.Videos[0].Title,
-		PartKey: mc.Videos[0].Media[0].Parts[0].Key,
+		Title:    mc.Videos[0].Title,
+		PartKey:  mc.Videos[0].Media[0].Parts[0].Key,
+		Duration: mc.Videos[0].Duration,
 	}, nil
 }
 
@@ -192,6 +199,48 @@ func (c *PlexClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Plex-Client-Identifier", "pli-app")
 	req.Header.Set("X-Plex-Product", "pli")
 	req.Header.Set("Accept", "application/xml")
+}
+
+func (c *PlexClient) RegisterPlaySession(ctx context.Context, ratingKey string) (string, error) {
+	sessionID := uuid.New().String()
+	params := url.Values{
+		"path":                      {fmt.Sprintf("/library/metadata/%s", ratingKey)},
+		"mediaIndex":                {"0"},
+		"partIndex":                 {"0"},
+		"protocol":                  {"http"},
+		"directPlay":                {"1"},
+		"directStream":              {"1"},
+		"X-Plex-Session-Identifier": {sessionID},
+	}
+	u := fmt.Sprintf("%s/video/:/transcode/universal/decision?%s", c.BaseURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req)
+	return sessionID, c.doExpect2xx(req, "plex decision")
+}
+
+type PlexSession struct {
+	Title      string
+	RatingKey  string
+	SessionKey string
+}
+
+func (c *PlexClient) FetchSessions(ctx context.Context) ([]PlexSession, error) {
+	var mc plexMediaContainer
+	if err := c.doXML(ctx, "/status/sessions", &mc); err != nil {
+		return nil, err
+	}
+	sessions := make([]PlexSession, 0, len(mc.Videos))
+	for _, v := range mc.Videos {
+		sessions = append(sessions, PlexSession{
+			Title:      v.Title,
+			RatingKey:  v.RatingKey,
+			SessionKey: v.SessionKey,
+		})
+	}
+	return sessions, nil
 }
 
 // PlexAuth handles the Plex OAuth PIN-based authentication flow against plex.tv.

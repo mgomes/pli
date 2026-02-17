@@ -411,6 +411,7 @@ body {
 }
 
 .movie-detail-card {
+  position: relative;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
@@ -418,6 +419,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  overflow: hidden;
+}
+
+.movie-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-art) center top / cover no-repeat;
+  opacity: 0.15;
+  mask-image: linear-gradient(to bottom, black 0%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.movie-detail-card > *:not(.movie-detail-backdrop) {
+  position: relative;
 }
 
 .movie-detail-back {

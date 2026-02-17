@@ -188,9 +188,8 @@ function wireSectionNav() {
   document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
     button.addEventListener("click", async () => {
       const section = button.dataset.section;
-      if (!section || section === state.section) {
-        return;
-      }
+      if (!section) return;
+      if (section === state.section && !state.selectedMovieId && !state.selectedShowId) return;
       await navigateToRoute({ section }, { historyMode: "push" });
     });
   });
@@ -459,7 +458,8 @@ function renderMovieDetail(movie) {
   }
 
   content.innerHTML = `
-    <article class="movie-detail-card">
+    <article class="movie-detail-card"${movie.art_url ? ` style="--bg-art: url(${escapeHtml(movie.art_url)})"` : ""}>
+      <div class="movie-detail-backdrop"></div>
       <button class="btn btn-secondary movie-detail-back" id="movie-detail-back">
         <i data-lucide="arrow-left"></i>
         Back to Movies
@@ -479,6 +479,9 @@ function renderMovieDetail(movie) {
           ${creditsHtml}
           ${mediaBadgesHtml}
           <div class="movie-detail-actions">
+            <span class="badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
+              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
+            </span>
             <button class="btn btn-primary" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
               <i data-lucide="play"></i>
               Play

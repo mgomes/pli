@@ -63,6 +63,7 @@ type movieItem struct {
 	Duration        int64    `json:"duration,omitempty"`
 	AddedAt         string   `json:"added_at"`
 	CoverURL        string   `json:"cover_url"`
+	ArtURL          string   `json:"art_url,omitempty"`
 	Summary         string   `json:"summary,omitempty"`
 	Rating          string   `json:"rating,omitempty"`
 	AudienceRating  string   `json:"audience_rating,omitempty"`
@@ -385,6 +386,7 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 			Duration:        row.Duration,
 			AddedAt:         row.AddedAt,
 			CoverURL:        s.plexImageURL(row.CoverPath),
+			ArtURL:          s.plexImageURL(row.ArtPath),
 			Summary:         row.Summary,
 			Rating:          row.Rating,
 			AudienceRating:  row.AudienceRating,

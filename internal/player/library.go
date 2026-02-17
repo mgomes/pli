@@ -31,6 +31,7 @@ type PlexMovie struct {
 	Duration        int64
 	AddedAt         string
 	CoverPath       string
+	ArtPath         string
 	Summary         string
 	Rating          string
 	AudienceRating  string
@@ -119,6 +120,7 @@ type browseVideo struct {
 	Title                string `xml:"title,attr"`
 	GrandparentTitle     string `xml:"grandparentTitle,attr"`
 	ParentTitle          string `xml:"parentTitle,attr"`
+	Art                  string `xml:"art,attr"`
 	Thumb                string `xml:"thumb,attr"`
 	ParentThumb          string `xml:"parentThumb,attr"`
 	GrandparentThumb     string `xml:"grandparentThumb,attr"`
@@ -249,6 +251,7 @@ func (c *PlexClient) FetchMovies(ctx context.Context) ([]PlexMovie, error) {
 				Duration:       v.Duration,
 				AddedAt:        toRFC3339(v.AddedAt),
 				CoverPath:      firstNonEmpty(v.Thumb),
+				ArtPath:        strings.TrimSpace(v.Art),
 				Summary:        strings.TrimSpace(v.Summary),
 				Rating:         strings.TrimSpace(v.Rating),
 				AudienceRating: strings.TrimSpace(v.AudienceRating),

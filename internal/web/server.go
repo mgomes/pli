@@ -55,12 +55,25 @@ type recentlyAddedItem struct {
 }
 
 type movieItem struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Year     int64  `json:"year"`
-	Watched  bool   `json:"watched"`
-	AddedAt  string `json:"added_at"`
-	CoverURL string `json:"cover_url"`
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Year            int64    `json:"year"`
+	Watched         bool     `json:"watched"`
+	AddedAt         string   `json:"added_at"`
+	CoverURL        string   `json:"cover_url"`
+	Summary         string   `json:"summary,omitempty"`
+	Rating          string   `json:"rating,omitempty"`
+	AudienceRating  string   `json:"audience_rating,omitempty"`
+	ContentRating   string   `json:"content_rating,omitempty"`
+	Tagline         string   `json:"tagline,omitempty"`
+	Duration        int64    `json:"duration,omitempty"`
+	Studio          string   `json:"studio,omitempty"`
+	Genres          []string `json:"genres,omitempty"`
+	Directors       []string `json:"directors,omitempty"`
+	Actors          []string `json:"actors,omitempty"`
+	VideoResolution string   `json:"video_resolution,omitempty"`
+	AudioCodec      string   `json:"audio_codec,omitempty"`
+	AudioChannels   int      `json:"audio_channels,omitempty"`
 }
 
 type tvShowItem struct {
@@ -355,12 +368,25 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 	movies := make([]movieItem, 0, len(rows))
 	for _, row := range rows {
 		movies = append(movies, movieItem{
-			ID:       row.ID,
-			Title:    row.Title,
-			Year:     row.Year,
-			Watched:  row.Watched,
-			AddedAt:  row.AddedAt,
-			CoverURL: s.plexImageURL(row.CoverPath),
+			ID:              row.ID,
+			Title:           row.Title,
+			Year:            row.Year,
+			Watched:         row.Watched,
+			AddedAt:         row.AddedAt,
+			CoverURL:        s.plexImageURL(row.CoverPath),
+			Summary:         row.Summary,
+			Rating:          row.Rating,
+			AudienceRating:  row.AudienceRating,
+			ContentRating:   row.ContentRating,
+			Tagline:         row.Tagline,
+			Duration:        row.Duration,
+			Studio:          row.Studio,
+			Genres:          row.Genres,
+			Directors:       row.Directors,
+			Actors:          row.Actors,
+			VideoResolution: row.VideoResolution,
+			AudioCodec:      row.AudioCodec,
+			AudioChannels:   row.AudioChannels,
 		})
 	}
 
@@ -408,16 +434,21 @@ func (s *Server) handleTVSeasons(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	show, err := plexClient.FetchShow(r.Context(), showID)
+	rows, err := plexClient.FetchSeasons(r.Context(), showID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
-	rows, err := plexClient.FetchSeasons(r.Context(), showID)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+	show := &player.PlexShow{
+		ID:    showID,
+		Title: "TV Show",
+	}
+	if fetched, err := plexClient.FetchShow(r.Context(), showID); err == nil && fetched != nil {
+		show = fetched
+	} else if len(rows) > 0 {
+		// Keep the endpoint functional even if metadata lookup is inconsistent.
+		show.Title = rows[0].Title
 	}
 
 	seasons := make([]tvSeasonItem, 0, len(rows))

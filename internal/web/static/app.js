@@ -3,6 +3,7 @@ const state = {
   config: [],
   recent: [],
   movies: [],
+  selectedMovieId: null,
   shows: [],
   selectedShowId: null,
   selectedShowTitle: "",
@@ -60,6 +61,7 @@ async function switchSection(section) {
   }
 
   if (section === "movies") {
+    state.selectedMovieId = null;
     await loadMovies();
     renderMovies();
   }
@@ -205,7 +207,7 @@ function renderMovies() {
       ${state.movies
         .map(
           (movie) => `
-        <article class="movie-card">
+        <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
           <div class="movie-card-cover">
             ${renderCover(movie.cover_url, movie.title)}
           </div>
@@ -225,6 +227,135 @@ function renderMovies() {
         .join("")}
     </div>
   `;
+  wirePlayButtons(content);
+  content.querySelectorAll("[data-movie-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const movieID = node.getAttribute("data-movie-id");
+      if (!movieID) {
+        return;
+      }
+      openMovieDetail(movieID);
+    });
+  });
+}
+
+function openMovieDetail(movieID) {
+  const movie = state.movies.find((item) => item.id === movieID);
+  if (!movie) {
+    return;
+  }
+  state.selectedMovieId = movie.id;
+  setHeader(movie.title, `Released ${movie.year || "Unknown"} · ${movie.watched ? "Watched" : "Unwatched"}`);
+  renderMovieDetail(movie);
+  drawIcons();
+}
+
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return "";
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function formatAudioChannels(n) {
+  if (!n || n <= 0) return "";
+  if (n === 1) return "Mono";
+  if (n === 2) return "Stereo";
+  return `${n - 1}.1`;
+}
+
+function renderMovieDetail(movie) {
+  const content = document.getElementById("content");
+
+  const metaParts = [];
+  if (movie.year) metaParts.push(String(movie.year));
+  if (movie.content_rating) metaParts.push(escapeHtml(movie.content_rating));
+  if (movie.duration) metaParts.push(formatDuration(movie.duration));
+  if (movie.studio) metaParts.push(escapeHtml(movie.studio));
+  const metaLine = metaParts.join(' <span class="sep">&middot;</span> ');
+
+  let ratingsHtml = "";
+  if (movie.rating || movie.audience_rating) {
+    const parts = [];
+    if (movie.rating) {
+      parts.push(`<div class="movie-detail-rating"><span class="movie-detail-rating-value">${escapeHtml(movie.rating)}</span><span class="movie-detail-rating-label">Critic</span></div>`);
+    }
+    if (movie.audience_rating) {
+      parts.push(`<div class="movie-detail-rating"><span class="movie-detail-rating-value">${escapeHtml(movie.audience_rating)}</span><span class="movie-detail-rating-label">Audience</span></div>`);
+    }
+    ratingsHtml = `<div class="movie-detail-ratings">${parts.join("")}</div>`;
+  }
+
+  let genresHtml = "";
+  if (movie.genres && movie.genres.length) {
+    genresHtml = `<div class="movie-detail-genres">${movie.genres.map((g) => `<span class="movie-detail-genre">${escapeHtml(g)}</span>`).join("")}</div>`;
+  }
+
+  let summaryHtml = "";
+  if (movie.summary) {
+    summaryHtml = `<p class="movie-detail-summary">${escapeHtml(movie.summary)}</p>`;
+  }
+
+  let creditsHtml = "";
+  const creditLines = [];
+  if (movie.directors && movie.directors.length) {
+    creditLines.push(`<div><span class="credit-label">Director </span><span class="credit-value">${movie.directors.map(escapeHtml).join(", ")}</span></div>`);
+  }
+  if (movie.actors && movie.actors.length) {
+    creditLines.push(`<div><span class="credit-label">Cast </span><span class="credit-value">${movie.actors.map(escapeHtml).join(", ")}</span></div>`);
+  }
+  if (creditLines.length) {
+    creditsHtml = `<div class="movie-detail-credits">${creditLines.join("")}</div>`;
+  }
+
+  let mediaBadgesHtml = "";
+  const badges = [];
+  if (movie.video_resolution) badges.push(movie.video_resolution.toUpperCase());
+  if (movie.audio_codec) badges.push(movie.audio_codec.toUpperCase());
+  const channels = formatAudioChannels(movie.audio_channels);
+  if (channels) badges.push(channels);
+  if (badges.length) {
+    mediaBadgesHtml = `<div class="movie-detail-media-info">${badges.map((b) => `<span class="movie-detail-media-badge">${escapeHtml(b)}</span>`).join("")}</div>`;
+  }
+
+  content.innerHTML = `
+    <article class="movie-detail-card">
+      <button class="btn btn-secondary movie-detail-back" id="movie-detail-back">
+        <i data-lucide="arrow-left"></i>
+        Back to Movies
+      </button>
+      <div class="movie-detail-layout">
+        <div class="movie-detail-cover">${renderCover(movie.cover_url, movie.title)}</div>
+        <div class="movie-detail-body">
+          <h2 class="movie-detail-title">${escapeHtml(movie.title)}</h2>
+          ${movie.tagline ? `<p class="movie-detail-tagline">${escapeHtml(movie.tagline)}</p>` : ""}
+          ${metaLine ? `<div class="movie-detail-meta-line">${metaLine}</div>` : ""}
+          ${ratingsHtml}
+          ${genresHtml}
+          ${summaryHtml}
+          ${creditsHtml}
+          ${mediaBadgesHtml}
+          <div class="movie-detail-actions">
+            <button class="btn btn-primary" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
+              <i data-lucide="play"></i>
+              Play
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
+
+  document.getElementById("movie-detail-back").addEventListener("click", () => {
+    state.selectedMovieId = null;
+    setHeader(sectionMeta.movies.title, sectionMeta.movies.description);
+    renderMovies();
+    drawIcons();
+  });
+
   wirePlayButtons(content);
 }
 

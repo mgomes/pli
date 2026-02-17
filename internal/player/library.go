@@ -23,12 +23,25 @@ type PlexRecentItem struct {
 }
 
 type PlexMovie struct {
-	ID        string
-	Title     string
-	Year      int64
-	Watched   bool
-	AddedAt   string
-	CoverPath string
+	ID              string
+	Title           string
+	Year            int64
+	Watched         bool
+	AddedAt         string
+	CoverPath       string
+	Summary         string
+	Rating          string
+	AudienceRating  string
+	ContentRating   string
+	Tagline         string
+	Duration        int64
+	Studio          string
+	Genres          []string
+	Directors       []string
+	Actors          []string
+	VideoResolution string
+	AudioCodec      string
+	AudioChannels   int
 }
 
 type PlexShow struct {
@@ -78,6 +91,24 @@ type browseDirectory struct {
 	Index           int64  `xml:"index,attr"`
 }
 
+type browseGenre struct {
+	Tag string `xml:"tag,attr"`
+}
+
+type browseDirector struct {
+	Tag string `xml:"tag,attr"`
+}
+
+type browseRole struct {
+	Tag string `xml:"tag,attr"`
+}
+
+type browseMediaInfo struct {
+	VideoResolution string `xml:"videoResolution,attr"`
+	AudioCodec      string `xml:"audioCodec,attr"`
+	AudioChannels   int    `xml:"audioChannels,attr"`
+}
+
 type browseVideo struct {
 	RatingKey            string `xml:"ratingKey,attr"`
 	GrandparentRatingKey string `xml:"grandparentRatingKey,attr"`
@@ -91,8 +122,22 @@ type browseVideo struct {
 	ParentIndex          int64  `xml:"parentIndex,attr"`
 	Index                int64  `xml:"index,attr"`
 	ViewCount            int64  `xml:"viewCount,attr"`
+	LeafCount            int64  `xml:"leafCount,attr"`
+	ViewedLeafCount      int64  `xml:"viewedLeafCount,attr"`
 	Year                 int64  `xml:"year,attr"`
 	AddedAt              int64  `xml:"addedAt,attr"`
+	Summary              string `xml:"summary,attr"`
+	Rating               string `xml:"rating,attr"`
+	AudienceRating       string `xml:"audienceRating,attr"`
+	ContentRating        string `xml:"contentRating,attr"`
+	Tagline              string `xml:"tagline,attr"`
+	Duration             int64  `xml:"duration,attr"`
+	Studio               string `xml:"studio,attr"`
+
+	Genres     []browseGenre     `xml:"Genre"`
+	Directors  []browseDirector  `xml:"Director"`
+	Roles      []browseRole      `xml:"Role"`
+	MediaItems []browseMediaInfo `xml:"Media"`
 }
 
 type plexSection struct {
@@ -162,18 +207,62 @@ func (c *PlexClient) FetchMovies(ctx context.Context) ([]PlexMovie, error) {
 		}
 
 		for _, v := range container.Videos {
+			if t := normalizeType(v.Type); t != "" && t != "movie" {
+				continue
+			}
 			ratingKey := strings.TrimSpace(v.RatingKey)
 			if ratingKey == "" {
 				continue
 			}
-			movies = append(movies, PlexMovie{
-				ID:        ratingKey,
-				Title:     v.Title,
-				Year:      v.Year,
-				Watched:   v.ViewCount > 0,
-				AddedAt:   toRFC3339(v.AddedAt),
-				CoverPath: firstNonEmpty(v.Thumb),
-			})
+			genres := make([]string, 0, len(v.Genres))
+			for _, g := range v.Genres {
+				if t := strings.TrimSpace(g.Tag); t != "" {
+					genres = append(genres, t)
+				}
+			}
+			directors := make([]string, 0, len(v.Directors))
+			for _, d := range v.Directors {
+				if t := strings.TrimSpace(d.Tag); t != "" {
+					directors = append(directors, t)
+				}
+			}
+			actors := make([]string, 0, len(v.Roles))
+			for _, r := range v.Roles {
+				if t := strings.TrimSpace(r.Tag); t != "" {
+					actors = append(actors, t)
+					if len(actors) >= 10 {
+						break
+					}
+				}
+			}
+
+			movie := PlexMovie{
+				ID:             ratingKey,
+				Title:          v.Title,
+				Year:           v.Year,
+				Watched:        v.ViewCount > 0,
+				AddedAt:        toRFC3339(v.AddedAt),
+				CoverPath:      firstNonEmpty(v.Thumb),
+				Summary:        strings.TrimSpace(v.Summary),
+				Rating:         strings.TrimSpace(v.Rating),
+				AudienceRating: strings.TrimSpace(v.AudienceRating),
+				ContentRating:  strings.TrimSpace(v.ContentRating),
+				Tagline:        strings.TrimSpace(v.Tagline),
+				Duration:       v.Duration,
+				Studio:         strings.TrimSpace(v.Studio),
+				Genres:         genres,
+				Directors:      directors,
+				Actors:         actors,
+			}
+
+			if len(v.MediaItems) > 0 {
+				m := v.MediaItems[0]
+				movie.VideoResolution = strings.TrimSpace(m.VideoResolution)
+				movie.AudioCodec = strings.TrimSpace(m.AudioCodec)
+				movie.AudioChannels = m.AudioChannels
+			}
+
+			movies = append(movies, movie)
 		}
 	}
 
@@ -191,6 +280,7 @@ func (c *PlexClient) FetchTVShows(ctx context.Context) ([]PlexShow, error) {
 	}
 
 	shows := []PlexShow{}
+	seen := make(map[string]struct{})
 	for _, section := range sections {
 		if section.Type != "show" {
 			continue
@@ -203,10 +293,17 @@ func (c *PlexClient) FetchTVShows(ctx context.Context) ([]PlexShow, error) {
 		}
 
 		for _, d := range container.Directories {
+			if t := normalizeType(d.Type); t != "" && t != "show" {
+				continue
+			}
 			showID := ratingKeyFromDirectory(d)
 			if showID == "" {
 				continue
 			}
+			if _, ok := seen[showID]; ok {
+				continue
+			}
+			seen[showID] = struct{}{}
 			nextUp := ""
 			if d.LeafCount > d.ViewedLeafCount {
 				nextUp = "Continue watching"
@@ -235,17 +332,34 @@ func (c *PlexClient) FetchShow(ctx context.Context, showID string) (*PlexShow, e
 		return nil, err
 	}
 
-	if len(container.Directories) == 0 {
-		return nil, fmt.Errorf("show %s not found", showID)
+	if len(container.Directories) > 0 {
+		d := container.Directories[0]
+		return &PlexShow{
+			ID:            ratingKeyFromDirectory(d),
+			Title:         safeTitle(d.Title),
+			WatchedCount:  d.ViewedLeafCount,
+			TotalEpisodes: d.LeafCount,
+			CoverPath:     d.Thumb,
+		}, nil
 	}
-	d := container.Directories[0]
-	return &PlexShow{
-		ID:            ratingKeyFromDirectory(d),
-		Title:         d.Title,
-		WatchedCount:  d.ViewedLeafCount,
-		TotalEpisodes: d.LeafCount,
-		CoverPath:     d.Thumb,
-	}, nil
+
+	// Some Plex responses encode show metadata as Video nodes.
+	if len(container.Videos) > 0 {
+		v := container.Videos[0]
+		id := strings.TrimSpace(v.RatingKey)
+		if id == "" {
+			id = showID
+		}
+		return &PlexShow{
+			ID:            id,
+			Title:         safeTitle(v.Title),
+			WatchedCount:  v.ViewedLeafCount,
+			TotalEpisodes: v.LeafCount,
+			CoverPath:     firstNonEmpty(v.Thumb, v.ParentThumb, v.GrandparentThumb),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("show %s not found", showID)
 }
 
 func (c *PlexClient) FetchSeasons(ctx context.Context, showID string) ([]PlexSeason, error) {
@@ -357,13 +471,14 @@ func (c *PlexClient) fetchSections(ctx context.Context) ([]plexSection, error) {
 
 	sections := []plexSection{}
 	for _, d := range container.Directories {
-		if d.Type != "movie" && d.Type != "show" {
+		itemType := normalizeType(d.Type)
+		if itemType != "movie" && itemType != "show" {
 			continue
 		}
 		if strings.TrimSpace(d.Key) == "" {
 			continue
 		}
-		sections = append(sections, plexSection{Key: d.Key, Type: d.Type})
+		sections = append(sections, plexSection{Key: d.Key, Type: itemType})
 	}
 	return sections, nil
 }
@@ -427,4 +542,8 @@ func safeTitle(value string) string {
 		return "Unknown Show"
 	}
 	return value
+}
+
+func normalizeType(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

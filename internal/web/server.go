@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -45,30 +47,33 @@ type configEntry struct {
 
 type recentlyAddedItem struct {
 	Type     string `json:"type"`
-	ID       int64  `json:"id"`
+	ID       string `json:"id"`
 	Headline string `json:"headline"`
 	Subline  string `json:"subline"`
 	AddedAt  string `json:"added_at"`
+	CoverURL string `json:"cover_url"`
 }
 
 type movieItem struct {
-	ID      int64  `json:"id"`
-	Title   string `json:"title"`
-	Year    int64  `json:"year"`
-	Watched bool   `json:"watched"`
-	AddedAt string `json:"added_at"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Year     int64  `json:"year"`
+	Watched  bool   `json:"watched"`
+	AddedAt  string `json:"added_at"`
+	CoverURL string `json:"cover_url"`
 }
 
 type tvShowItem struct {
-	ID            int64  `json:"id"`
+	ID            string `json:"id"`
 	Title         string `json:"title"`
 	WatchedCount  int64  `json:"watched_count"`
 	TotalEpisodes int64  `json:"total_episodes"`
 	NextUp        string `json:"next_up"`
+	CoverURL      string `json:"cover_url"`
 }
 
 type tvSeasonItem struct {
-	ID            int64  `json:"id"`
+	ID            string `json:"id"`
 	SeasonNumber  int64  `json:"season_number"`
 	Title         string `json:"title"`
 	WatchedCount  int64  `json:"watched_count"`
@@ -76,7 +81,7 @@ type tvSeasonItem struct {
 }
 
 type tvEpisodeItem struct {
-	ID            int64  `json:"id"`
+	ID            string `json:"id"`
 	SeasonNumber  int64  `json:"season_number"`
 	EpisodeNumber int64  `json:"episode_number"`
 	Title         string `json:"title"`
@@ -124,11 +129,16 @@ func (s *Server) router() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/config", s.handleConfig)
+		r.Put("/config", s.handleUpdateConfig)
 		r.Get("/recently-added", s.handleRecentlyAdded)
 		r.Get("/movies", s.handleMovies)
 		r.Get("/tv/shows", s.handleTVShows)
 		r.Get("/tv/shows/{showID}/seasons", s.handleTVSeasons)
 		r.Get("/tv/seasons/{seasonID}/episodes", s.handleTVEpisodes)
+		r.Get("/plex/image", s.handlePlexImage)
+		r.Post("/plex/test", s.handlePlexTest)
+		r.Post("/plex/auth/start", s.handlePlexAuthStart)
+		r.Get("/plex/auth/poll/{pinID}", s.handlePlexAuthPoll)
 		r.Post("/play", s.handlePlay)
 		r.Get("/playback", s.handlePlayback)
 	})
@@ -163,6 +173,126 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"configs": configs})
 }
 
+var configAllowlist = map[string]bool{
+	"plex.base_url":  true,
+	"plex.token":     true,
+	"plex.client_id": true,
+	"player.default": true,
+}
+
+func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var req configEntry
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if !configAllowlist[req.Key] {
+		writeError(w, http.StatusBadRequest, "unknown config key")
+		return
+	}
+
+	if err := s.queries.UpsertConfig(r.Context(), db.UpsertConfigParams{
+		Key:       req.Key,
+		Value:     req.Value,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handlePlexTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BaseURL string `json:"base_url"`
+		Token   string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.BaseURL == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "base URL is required"})
+		return
+	}
+
+	client := &player.PlexClient{BaseURL: req.BaseURL, Token: req.Token}
+	serverName, err := client.TestConnection(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server_name": serverName})
+}
+
+func (s *Server) handlePlexAuthStart(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.queries.GetConfig(r.Context(), "plex.client_id")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read client ID")
+		return
+	}
+
+	auth := &player.PlexAuth{ClientID: cfg.Value, Product: "pli"}
+	pin, err := auth.CreatePin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pin_id":   pin.ID,
+		"code":     pin.Code,
+		"auth_url": pin.AuthURL,
+	})
+}
+
+func (s *Server) handlePlexAuthPoll(w http.ResponseWriter, r *http.Request) {
+	pinID, err := parseIDParam(r, "pinID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid pin ID")
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	cfg, err := s.queries.GetConfig(r.Context(), "plex.client_id")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read client ID")
+		return
+	}
+
+	auth := &player.PlexAuth{ClientID: cfg.Value, Product: "pli"}
+	token, err := auth.CheckPin(r.Context(), pinID, code)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	if token == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"done": false})
+		return
+	}
+
+	if err := s.queries.UpsertConfig(r.Context(), db.UpsertConfigParams{
+		Key:       "plex.token",
+		Value:     token,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"done": true})
+}
+
 func (s *Server) handleRecentlyAdded(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	_ = s.queries.DeleteExpiredCacheItems(r.Context(), sql.NullString{String: now.Format(time.RFC3339), Valid: true})
@@ -174,20 +304,27 @@ func (s *Server) handleRecentlyAdded(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.queries.ListRecentlyAdded(r.Context(), 12)
+	plexClient, err := s.plexClient(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load recently added")
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	rows, err := plexClient.FetchRecentlyAdded(r.Context(), 24)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	items := make([]recentlyAddedItem, 0, len(rows))
 	for _, row := range rows {
 		item := recentlyAddedItem{
-			Type:     row.ItemType,
-			ID:       row.ItemID,
+			Type:     row.Kind,
+			ID:       row.ID,
 			Headline: row.Headline,
-			Subline:  nullString(row.Subline),
+			Subline:  row.Subline,
 			AddedAt:  row.AddedAt,
+			CoverURL: s.plexImageURL(row.CoverPath),
 		}
 		items = append(items, item)
 	}
@@ -203,20 +340,27 @@ func (s *Server) handleRecentlyAdded(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.queries.ListMovies(r.Context())
+	plexClient, err := s.plexClient(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load movies")
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	rows, err := plexClient.FetchMovies(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	movies := make([]movieItem, 0, len(rows))
 	for _, row := range rows {
 		movies = append(movies, movieItem{
-			ID:      row.ID,
-			Title:   row.Title,
-			Year:    row.ReleaseYear,
-			Watched: row.Watched == 1,
-			AddedAt: row.AddedAt,
+			ID:       row.ID,
+			Title:    row.Title,
+			Year:     row.Year,
+			Watched:  row.Watched,
+			AddedAt:  row.AddedAt,
+			CoverURL: s.plexImageURL(row.CoverPath),
 		})
 	}
 
@@ -224,24 +368,27 @@ func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTVShows(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.queries.ListTVShows(r.Context())
+	plexClient, err := s.plexClient(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load tv shows")
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	rows, err := plexClient.FetchTVShows(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	shows := make([]tvShowItem, 0, len(rows))
 	for _, row := range rows {
-		nextUp := ""
-		if row.NextUpSeason > 0 && row.NextUpEpisode > 0 {
-			nextUp = fmt.Sprintf("S%02dE%02d · %s", row.NextUpSeason, row.NextUpEpisode, row.NextUpTitle)
-		}
 		shows = append(shows, tvShowItem{
 			ID:            row.ID,
 			Title:         row.Title,
 			WatchedCount:  row.WatchedCount,
 			TotalEpisodes: row.TotalEpisodes,
-			NextUp:        nextUp,
+			NextUp:        row.NextUp,
+			CoverURL:      s.plexImageURL(row.CoverPath),
 		})
 	}
 
@@ -249,25 +396,27 @@ func (s *Server) handleTVShows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTVSeasons(w http.ResponseWriter, r *http.Request) {
-	showID, err := parseIDParam(r, "showID")
-	if err != nil {
+	showID := strings.TrimSpace(chi.URLParam(r, "showID"))
+	if showID == "" {
 		writeError(w, http.StatusBadRequest, "invalid show id")
 		return
 	}
 
-	show, err := s.queries.GetShow(r.Context(), showID)
+	plexClient, err := s.plexClient(r.Context())
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "show not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to load show")
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
 		return
 	}
 
-	rows, err := s.queries.ListSeasonsByShow(r.Context(), showID)
+	show, err := plexClient.FetchShow(r.Context(), showID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load seasons")
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	rows, err := plexClient.FetchSeasons(r.Context(), showID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -282,36 +431,55 @@ func (s *Server) handleTVSeasons(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	nextUp := ""
+	if show.TotalEpisodes > show.WatchedCount {
+		nextEpisode, err := plexClient.FetchNextUpEpisode(r.Context(), showID)
+		if err == nil && nextEpisode != nil {
+			nextUp = fmt.Sprintf("S%02dE%02d · %s", nextEpisode.SeasonNumber, nextEpisode.EpisodeNumber, nextEpisode.Title)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"show": map[string]any{
-			"id":    show.ID,
-			"title": show.Title,
+			"id":        show.ID,
+			"title":     show.Title,
+			"next_up":   nextUp,
+			"cover_url": s.plexImageURL(show.CoverPath),
 		},
 		"seasons": seasons,
 	})
 }
 
 func (s *Server) handleTVEpisodes(w http.ResponseWriter, r *http.Request) {
-	seasonID, err := parseIDParam(r, "seasonID")
-	if err != nil {
+	seasonID := strings.TrimSpace(chi.URLParam(r, "seasonID"))
+	if seasonID == "" {
 		writeError(w, http.StatusBadRequest, "invalid season id")
 		return
 	}
 
-	season, err := s.queries.GetSeason(r.Context(), seasonID)
+	plexClient, err := s.plexClient(r.Context())
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "season not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to load season")
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
 		return
 	}
 
-	rows, err := s.queries.ListEpisodesBySeason(r.Context(), seasonID)
+	rows, err := plexClient.FetchEpisodes(r.Context(), seasonID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load episodes")
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+
+	showID := strings.TrimSpace(r.URL.Query().Get("show_id"))
+	if showID == "" && len(rows) > 0 {
+		showID = rows[0].ShowID
+	}
+
+	nextUpID := ""
+	if showID != "" {
+		nextEpisode, err := plexClient.FetchNextUpEpisode(r.Context(), showID)
+		if err == nil && nextEpisode != nil {
+			nextUpID = nextEpisode.ID
+		}
 	}
 
 	episodes := make([]tvEpisodeItem, 0, len(rows))
@@ -321,21 +489,76 @@ func (s *Server) handleTVEpisodes(w http.ResponseWriter, r *http.Request) {
 			SeasonNumber:  row.SeasonNumber,
 			EpisodeNumber: row.EpisodeNumber,
 			Title:         row.Title,
-			Watched:       row.Watched == 1,
-			IsNextUp:      row.IsNextUp == 1,
+			Watched:       row.Watched,
+			IsNextUp:      nextUpID != "" && row.ID == nextUpID,
 			AddedAt:       row.AddedAt,
 		})
 	}
 
+	seasonNumber := int64(0)
+	seasonTitle := ""
+	if len(rows) > 0 {
+		seasonNumber = rows[0].SeasonNumber
+		seasonTitle = fmt.Sprintf("Season %d", seasonNumber)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"season": map[string]any{
-			"id":            season.ID,
-			"show_id":       season.ShowID,
-			"season_number": season.SeasonNumber,
-			"title":         season.Title,
+			"id":            seasonID,
+			"show_id":       showID,
+			"season_number": seasonNumber,
+			"title":         seasonTitle,
 		},
 		"episodes": episodes,
 	})
+}
+
+func (s *Server) handlePlexImage(w http.ResponseWriter, r *http.Request) {
+	coverPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if coverPath == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	if !strings.HasPrefix(coverPath, "/") || strings.Contains(coverPath, "://") {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	targetURL := strings.TrimRight(plexClient.BaseURL, "/") + coverPath
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build plex image request")
+		return
+	}
+	if plexClient.Token != "" {
+		req.Header.Set("X-Plex-Token", plexClient.Token)
+	}
+	req.Header.Set("Accept", "image/*")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch image from plex")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		writeError(w, http.StatusBadGateway, "plex image request failed")
+		return
+	}
+
+	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +614,43 @@ func (s *Server) setCachedPayload(ctx context.Context, namespace, key string, pa
 	})
 }
 
+func (s *Server) plexClient(ctx context.Context) (*player.PlexClient, error) {
+	baseURL, err := s.configValue(ctx, "plex.base_url")
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.configValue(ctx, "plex.token")
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:32400"
+	}
+
+	return &player.PlexClient{
+		BaseURL: baseURL,
+		Token:   strings.TrimSpace(token),
+	}, nil
+}
+
+func (s *Server) configValue(ctx context.Context, key string) (string, error) {
+	row, err := s.queries.GetConfig(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	return row.Value, nil
+}
+
+func (s *Server) plexImageURL(coverPath string) string {
+	coverPath = strings.TrimSpace(coverPath)
+	if coverPath == "" {
+		return ""
+	}
+	return "/api/plex/image?path=" + url.QueryEscape(coverPath)
+}
+
 func parseIDParam(r *http.Request, name string) (int64, error) {
 	value := chi.URLParam(r, name)
 	parsed, err := strconv.ParseInt(value, 10, 64)
@@ -398,13 +658,6 @@ func parseIDParam(r *http.Request, name string) (int64, error) {
 		return 0, fmt.Errorf("invalid %s", name)
 	}
 	return parsed, nil
-}
-
-func nullString(v sql.NullString) string {
-	if !v.Valid {
-		return ""
-	}
-	return v.String
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mgomes/pli/internal/db"
 	"github.com/mgomes/pli/internal/player"
 	"github.com/mgomes/pli/internal/web"
@@ -159,28 +160,17 @@ func ensureDefaultConfig(ctx context.Context, queries *db.Queries) error {
 		defaultPlayer = "iina"
 	}
 
+	// Insert-if-missing defaults so user-updated values survive restarts.
 	defaults := map[string]string{
 		"app.name":       "pli",
 		"app.theme":      "dark",
 		"player.default": defaultPlayer,
 		"plex.base_url":  "http://127.0.0.1:32400",
+		"plex.token":     "",
+		"plex.client_id": uuid.New().String(),
 	}
 
 	for key, value := range defaults {
-		if err := queries.UpsertConfig(ctx, db.UpsertConfigParams{
-			Key:       key,
-			Value:     value,
-			UpdatedAt: now,
-		}); err != nil {
-			return err
-		}
-	}
-
-	// Insert-if-not-exists so we don't overwrite user-set tokens on restart.
-	softDefaults := map[string]string{
-		"plex.token": "",
-	}
-	for key, value := range softDefaults {
 		if err := queries.InsertConfigIfNotExists(ctx, db.InsertConfigIfNotExistsParams{
 			Key:       key,
 			Value:     value,

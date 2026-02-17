@@ -2,6 +2,7 @@ package player
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -17,8 +18,9 @@ type PlexClient struct {
 }
 
 type plexMediaContainer struct {
-	XMLName xml.Name    `xml:"MediaContainer"`
-	Videos  []plexVideo `xml:"Video"`
+	XMLName      xml.Name    `xml:"MediaContainer"`
+	FriendlyName string      `xml:"friendlyName,attr"`
+	Videos       []plexVideo `xml:"Video"`
 }
 
 type plexVideo struct {
@@ -37,6 +39,37 @@ type plexPart struct {
 type PlexMetadata struct {
 	Title   string
 	PartKey string
+}
+
+func (c *PlexClient) TestConnection(ctx context.Context) (string, error) {
+	u := c.BaseURL
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("plex identity request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("plex identity: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("plex identity read: %w", err)
+	}
+
+	var mc plexMediaContainer
+	if err := xml.Unmarshal(body, &mc); err != nil {
+		return "", fmt.Errorf("plex identity parse: %w", err)
+	}
+
+	return mc.FriendlyName, nil
 }
 
 func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*PlexMetadata, error) {
@@ -140,4 +173,101 @@ func (c *PlexClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Plex-Client-Identifier", "pli-app")
 	req.Header.Set("X-Plex-Product", "pli")
 	req.Header.Set("Accept", "application/xml")
+}
+
+// PlexAuth handles the Plex OAuth PIN-based authentication flow against plex.tv.
+type PlexAuth struct {
+	ClientID string
+	Product  string
+}
+
+type PlexPin struct {
+	ID      int64  `json:"id"`
+	Code    string `json:"code"`
+	AuthURL string `json:"auth_url"`
+}
+
+func (a *PlexAuth) CreatePin(ctx context.Context) (*PlexPin, error) {
+	form := url.Values{
+		"strong":                    {"true"},
+		"X-Plex-Product":           {a.Product},
+		"X-Plex-Client-Identifier": {a.ClientID},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://plex.tv/api/v2/pins", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("plex create pin: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("plex create pin: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result struct {
+		ID   int64  `json:"id"`
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("plex create pin: decode: %w", err)
+	}
+
+	authURL := fmt.Sprintf("https://app.plex.tv/auth#?clientID=%s&code=%s&context%%5Bdevice%%5D%%5Bproduct%%5D=%s",
+		url.QueryEscape(a.ClientID),
+		url.QueryEscape(result.Code),
+		url.QueryEscape(a.Product),
+	)
+
+	return &PlexPin{
+		ID:      result.ID,
+		Code:    result.Code,
+		AuthURL: authURL,
+	}, nil
+}
+
+func (a *PlexAuth) CheckPin(ctx context.Context, pinID int64, code string) (string, error) {
+	u := fmt.Sprintf("https://plex.tv/api/v2/pins/%d", pinID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Client-Identifier", a.ClientID)
+	q := req.URL.Query()
+	q.Set("code", code)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("plex check pin: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Treat rate-limiting as "not ready yet" rather than a hard error.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", nil
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("plex check pin: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result struct {
+		AuthToken string `json:"authToken"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("plex check pin: decode: %w", err)
+	}
+
+	return result.AuthToken, nil
 }

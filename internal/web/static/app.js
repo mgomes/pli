@@ -24,6 +24,10 @@ const sectionMeta = {
     title: "Movies",
     description: "Your movie collection at a glance.",
   },
+  settings: {
+    title: "Settings",
+    description: "Configure your Plex server connection.",
+  },
 };
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -34,8 +38,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 
 function wireSectionNav() {
-  const nav = document.getElementById("section-nav");
-  nav.querySelectorAll(".nav-item").forEach((button) => {
+  document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
     button.addEventListener("click", async () => {
       const section = button.dataset.section;
       if (!section || section === state.section) {
@@ -66,11 +69,15 @@ async function switchSection(section) {
     renderTV();
   }
 
+  if (section === "settings") {
+    renderSettings();
+  }
+
   drawIcons();
 }
 
 function setActiveButton(section) {
-  document.querySelectorAll(".nav-item").forEach((button) => {
+  document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
     button.classList.toggle("active", button.dataset.section === section);
   });
 }
@@ -117,7 +124,7 @@ async function loadTVShows() {
 
 async function selectShow(showId) {
   state.selectedShowId = showId;
-  const response = await fetchJSON(`/api/tv/shows/${showId}/seasons`);
+  const response = await fetchJSON(`/api/tv/shows/${encodeURIComponent(showId)}/seasons`);
   state.selectedShowTitle = response.show?.title ?? "";
   state.seasons = response.seasons ?? [];
 
@@ -137,7 +144,8 @@ async function selectShow(showId) {
 
 async function selectSeason(seasonId, rerender = true) {
   state.selectedSeasonId = seasonId;
-  const response = await fetchJSON(`/api/tv/seasons/${seasonId}/episodes`);
+  const showQuery = state.selectedShowId ? `?show_id=${encodeURIComponent(state.selectedShowId)}` : "";
+  const response = await fetchJSON(`/api/tv/seasons/${encodeURIComponent(seasonId)}/episodes${showQuery}`);
   state.episodes = response.episodes ?? [];
   if (rerender) {
     renderTV();
@@ -160,6 +168,9 @@ function renderRecentlyAdded() {
         .map(
           (item) => `
         <article class="media-card">
+          <div class="media-card-cover">
+            ${renderCover(item.cover_url, item.headline)}
+          </div>
           <div class="media-card-accent ${escapeHtml(item.type)}"></div>
           <div class="media-card-body">
             <div class="media-card-info">
@@ -167,7 +178,7 @@ function renderRecentlyAdded() {
               ${item.subline ? `<div class="media-card-sub">${escapeHtml(item.subline)}</div>` : ""}
             </div>
             <div style="display:flex;align-items:center;gap:0.5rem">
-              <button class="play-btn" data-play-type="${escapeHtml(item.type)}" data-play-id="${item.id}" title="Play">
+              <button class="play-btn" data-play-type="${escapeHtml(item.type)}" data-play-id="${escapeHtml(item.id)}" title="Play">
                 <i data-lucide="play"></i>
               </button>
               <span class="badge ${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
@@ -195,13 +206,16 @@ function renderMovies() {
         .map(
           (movie) => `
         <article class="movie-card">
+          <div class="movie-card-cover">
+            ${renderCover(movie.cover_url, movie.title)}
+          </div>
           <div class="movie-card-year">${movie.year}</div>
           <div class="movie-card-title">${escapeHtml(movie.title)}</div>
           <div class="movie-card-footer">
             <span class="badge ${movie.watched ? "watched" : "unwatched"}">
               ${movie.watched ? "Watched" : "Unwatched"}
             </span>
-            <button class="play-btn" data-play-type="movie" data-play-id="${movie.id}" title="Play">
+            <button class="play-btn" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
               <i data-lucide="play"></i>
             </button>
           </div>
@@ -234,12 +248,15 @@ function renderTV() {
               const pct = show.total_episodes > 0 ? Math.round((show.watched_count / show.total_episodes) * 100) : 0;
               const isComplete = pct === 100;
               return `
-              <div class="show-item ${show.id === state.selectedShowId ? "active" : ""}" data-show-id="${show.id}">
+              <div class="show-item ${show.id === state.selectedShowId ? "active" : ""}" data-show-id="${escapeHtml(show.id)}">
+                <div class="show-item-cover">
+                  ${renderCover(show.cover_url, show.title)}
+                </div>
                 <div class="show-item-info">
                   <div class="show-item-title">${escapeHtml(show.title)}</div>
                   <div class="show-item-meta">
                     ${show.watched_count}/${show.total_episodes} episodes
-                    ${show.next_up ? ` · Next: ${escapeHtml(show.next_up)}` : " · All caught up"}
+                    ${show.next_up ? ` · ${escapeHtml(show.next_up)}` : " · All caught up"}
                   </div>
                   <div class="progress-bar">
                     <div class="progress-fill ${isComplete ? "complete" : ""}" style="width:${pct}%"></div>
@@ -260,7 +277,7 @@ function renderTV() {
             ${state.seasons
               .map(
                 (season) => `
-              <button class="season-tab ${season.id === state.selectedSeasonId ? "active" : ""}" data-season-id="${season.id}">
+              <button class="season-tab ${season.id === state.selectedSeasonId ? "active" : ""}" data-season-id="${escapeHtml(season.id)}">
                 S${season.season_number}
                 <span style="opacity:0.5;margin-left:2px">${season.watched_count}/${season.total_episodes}</span>
               </button>
@@ -286,7 +303,7 @@ function renderTV() {
                   <span class="badge ${episode.watched ? "watched" : "unwatched"}">
                     ${episode.watched ? "Watched" : "Unwatched"}
                   </span>
-                  <button class="play-btn" data-play-type="episode" data-play-id="${episode.id}" title="Play">
+                  <button class="play-btn" data-play-type="episode" data-play-id="${escapeHtml(episode.id)}" title="Play">
                     <i data-lucide="play"></i>
                   </button>
                 </div>
@@ -302,7 +319,7 @@ function renderTV() {
 
   content.querySelectorAll("[data-show-id]").forEach((node) => {
     node.addEventListener("click", async () => {
-      const showId = Number(node.getAttribute("data-show-id"));
+      const showId = node.getAttribute("data-show-id");
       if (!showId || showId === state.selectedShowId) {
         return;
       }
@@ -314,7 +331,7 @@ function renderTV() {
 
   content.querySelectorAll("[data-season-id]").forEach((node) => {
     node.addEventListener("click", async () => {
-      const seasonId = Number(node.getAttribute("data-season-id"));
+      const seasonId = node.getAttribute("data-season-id");
       if (!seasonId || seasonId === state.selectedSeasonId) {
         return;
       }
@@ -323,6 +340,142 @@ function renderTV() {
   });
 
   wirePlayButtons(content);
+}
+
+function renderSettings() {
+  const content = document.getElementById("content");
+  const getConfig = (key) => state.config.find((c) => c.key === key)?.value ?? "";
+
+  const hasToken = getConfig("plex.token") !== "";
+
+  content.innerHTML = `
+    <div class="settings-form">
+      <div class="form-group">
+        <label class="form-label" for="plex-url">Plex Server URL</label>
+        <input class="form-input" id="plex-url" type="url" placeholder="http://192.168.1.100:32400" value="${escapeHtml(getConfig("plex.base_url"))}" />
+        <span class="form-help">The address of your Plex Media Server, including port.</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Plex Account</label>
+        <div class="auth-actions">
+          ${
+            hasToken
+              ? `<span class="auth-status"><span class="auth-status-dot"></span>Authenticated</span>
+                 <button class="btn btn-secondary" id="plex-auth-btn">Re-authenticate</button>`
+              : `<button class="btn btn-primary" id="plex-auth-btn">Sign in with Plex</button>`
+          }
+        </div>
+        <span class="form-help">Authenticate with your Plex account to connect your library.</span>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" id="settings-save">Save</button>
+        <button class="btn btn-secondary" id="settings-test">Test Connection</button>
+      </div>
+
+      <div id="settings-status"></div>
+    </div>
+  `;
+
+  document.getElementById("plex-auth-btn").addEventListener("click", startPlexAuth);
+
+  document.getElementById("settings-save").addEventListener("click", async () => {
+    const statusEl = document.getElementById("settings-status");
+    const baseUrl = document.getElementById("plex-url").value.trim();
+
+    const updates = [];
+    if (baseUrl !== getConfig("plex.base_url")) {
+      updates.push({ key: "plex.base_url", value: baseUrl });
+    }
+
+    if (!updates.length) {
+      statusEl.className = "settings-status";
+      statusEl.textContent = "No changes to save.";
+      return;
+    }
+
+    try {
+      for (const entry of updates) {
+        await putJSON("/api/config", entry);
+      }
+      await loadConfig();
+      statusEl.className = "settings-status success";
+      statusEl.textContent = "Settings saved.";
+    } catch (err) {
+      statusEl.className = "settings-status error";
+      statusEl.textContent = err.message;
+    }
+  });
+
+  document.getElementById("settings-test").addEventListener("click", async () => {
+    const statusEl = document.getElementById("settings-status");
+    const baseUrl = document.getElementById("plex-url").value.trim();
+    const token = getConfig("plex.token");
+
+    statusEl.className = "settings-status";
+    statusEl.textContent = "Testing connection...";
+
+    try {
+      const result = await postJSON("/api/plex/test", { base_url: baseUrl, token });
+      if (result.ok) {
+        statusEl.className = "settings-status success";
+        statusEl.textContent = `Connected to "${result.server_name}"`;
+      } else {
+        statusEl.className = "settings-status error";
+        statusEl.textContent = result.error;
+      }
+    } catch (err) {
+      statusEl.className = "settings-status error";
+      statusEl.textContent = err.message;
+    }
+  });
+}
+
+async function startPlexAuth() {
+  const statusEl = document.getElementById("settings-status");
+  statusEl.className = "settings-status";
+  statusEl.textContent = "Starting Plex authentication...";
+
+  let pin;
+  try {
+    pin = await postJSON("/api/plex/auth/start", {});
+  } catch (err) {
+    statusEl.className = "settings-status error";
+    statusEl.textContent = err.message;
+    return;
+  }
+
+  const popup = window.open(pin.auth_url, "plexAuth", "width=800,height=700");
+
+  statusEl.className = "settings-status";
+  statusEl.textContent = "Waiting for Plex authentication...";
+
+  const pollInterval = setInterval(async () => {
+    try {
+      const result = await fetchJSON(`/api/plex/auth/poll/${pin.pin_id}?code=${encodeURIComponent(pin.code)}`);
+      if (result.done) {
+        clearInterval(pollInterval);
+        if (popup && !popup.closed) popup.close();
+        await loadConfig();
+        statusEl.className = "settings-status success";
+        statusEl.textContent = "Authenticated successfully.";
+        renderSettings();
+        drawIcons();
+      }
+    } catch {
+      // Ignore transient errors and keep polling.
+    }
+  }, 3000);
+
+  // Stop polling after 5 minutes.
+  setTimeout(() => {
+    clearInterval(pollInterval);
+    if (statusEl.textContent === "Waiting for Plex authentication...") {
+      statusEl.className = "settings-status error";
+      statusEl.textContent = "Authentication timed out.";
+    }
+  }, 5 * 60 * 1000);
 }
 
 // ---- Utilities ----
@@ -342,6 +495,13 @@ async function safeJSON(response) {
   } catch {
     return null;
   }
+}
+
+function renderCover(url, alt) {
+  if (!url) {
+    return `<div class="cover-fallback"><i data-lucide="image-off"></i></div>`;
+  }
+  return `<img class="cover-image" src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy" />`;
 }
 
 function drawIcons() {
@@ -364,6 +524,19 @@ function escapeHtml(value) {
 async function postJSON(path, body) {
   const response = await fetch(path, {
     method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await safeJSON(response);
+    throw new Error(payload?.error || `Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function putJSON(path, body) {
+  const response = await fetch(path, {
+    method: "PUT",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
   });

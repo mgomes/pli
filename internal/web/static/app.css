@@ -235,6 +235,10 @@ body {
   border-color: hsl(var(--muted-foreground) / 0.3);
 }
 
+.media-card.clickable {
+  cursor: pointer;
+}
+
 .media-card-accent {
   width: 4px;
 }

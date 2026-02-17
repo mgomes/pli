@@ -288,7 +288,10 @@ function renderRecentlyAdded() {
       ${state.recent
         .map(
           (item) => `
-        <article class="media-card">
+        <article
+          class="media-card ${item.type === "movie" ? "clickable" : ""}"
+          ${item.type === "movie" ? `data-open-movie-id="${escapeHtml(item.id)}"` : ""}
+        >
           <div class="media-card-cover">
             ${renderCover(item.cover_url, item.headline)}
           </div>
@@ -312,6 +315,15 @@ function renderRecentlyAdded() {
     </div>
   `;
   wirePlayButtons(content);
+  content.querySelectorAll("[data-open-movie-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const movieID = node.getAttribute("data-open-movie-id");
+      if (!movieID) {
+        return;
+      }
+      void navigateToRoute({ section: "movies", movieId: movieID }, { historyMode: "push" });
+    });
+  });
 }
 
 function renderMovies() {

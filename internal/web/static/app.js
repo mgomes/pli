@@ -346,11 +346,33 @@ function renderMovies() {
     return;
   }
 
-  content.innerHTML = `
-    <div class="movie-grid">
-      ${state.movies
-        .map(
-          (movie) => `
+  // Group movies by first letter
+  const groups = new Map();
+  for (const movie of state.movies) {
+    const first = (movie.title || "").charAt(0).toUpperCase();
+    const letter = /[A-Z]/.test(first) ? first : "#";
+    if (!groups.has(letter)) groups.set(letter, []);
+    groups.get(letter).push(movie);
+  }
+
+  const allLetters = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+  const activeLetters = new Set(groups.keys());
+
+  const railHtml = allLetters
+    .map((l) => {
+      const active = activeLetters.has(l);
+      return `<button class="az-letter ${active ? "" : "disabled"}" ${active ? `data-az-jump="${l}"` : ""}>${l}</button>`;
+    })
+    .join("");
+
+  let gridHtml = "";
+  for (const letter of allLetters) {
+    const movies = groups.get(letter);
+    if (!movies) continue;
+    gridHtml += `<div class="movie-grid-letter" id="az-${letter}">${letter}</div>`;
+    gridHtml += movies
+      .map(
+        (movie) => `
         <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
           <div class="movie-card-cover">
             ${renderCover(movie.cover_url, movie.title)}
@@ -366,11 +388,27 @@ function renderMovies() {
           <div class="movie-card-title">${escapeHtml(movie.title)}</div>
         </article>
       `,
-        )
-        .join("")}
+      )
+      .join("");
+  }
+
+  content.innerHTML = `
+    <div class="movie-index">
+      <div class="movie-grid">${gridHtml}</div>
+      <nav class="az-rail">${railHtml}</nav>
     </div>
   `;
+
   wirePlayButtons(content);
+
+  content.querySelectorAll("[data-az-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const letter = btn.getAttribute("data-az-jump");
+      const target = document.getElementById("az-" + letter);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
   content.querySelectorAll("[data-movie-id]").forEach((node) => {
     node.addEventListener("click", () => {
       const movieID = node.getAttribute("data-movie-id");

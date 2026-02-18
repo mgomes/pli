@@ -72,6 +72,7 @@ type PlexEpisode struct {
 	SeasonNumber  int64
 	EpisodeNumber int64
 	Title         string
+	Summary       string
 	Watched       bool
 	ViewOffset    int64
 	Duration      int64
@@ -430,6 +431,7 @@ func (c *PlexClient) FetchEpisodes(ctx context.Context, seasonID string) ([]Plex
 			SeasonNumber:  v.ParentIndex,
 			EpisodeNumber: v.Index,
 			Title:         v.Title,
+			Summary:       strings.TrimSpace(v.Summary),
 			Watched:       v.ViewCount > 0,
 			ViewOffset:    v.ViewOffset,
 			Duration:      v.Duration,

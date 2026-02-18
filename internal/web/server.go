@@ -102,6 +102,7 @@ type tvEpisodeItem struct {
 	SeasonNumber  int64  `json:"season_number"`
 	EpisodeNumber int64  `json:"episode_number"`
 	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
 	Watched       bool   `json:"watched"`
 	ViewOffset    int64  `json:"view_offset,omitempty"`
 	Duration      int64  `json:"duration,omitempty"`
@@ -539,6 +540,7 @@ func (s *Server) handleTVEpisodes(w http.ResponseWriter, r *http.Request) {
 			SeasonNumber:  row.SeasonNumber,
 			EpisodeNumber: row.EpisodeNumber,
 			Title:         row.Title,
+			Summary:       row.Summary,
 			Watched:       row.Watched,
 			ViewOffset:    row.ViewOffset,
 			Duration:      row.Duration,

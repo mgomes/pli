@@ -603,30 +603,33 @@ function renderTV() {
             ${state.episodes
               .map(
                 (episode) => `
-              <div class="episode-item">
-                <span class="episode-num">E${String(episode.episode_number).padStart(2, "0")}</span>
-                ${progressRing(episode.view_offset, episode.duration)}
-                <span class="episode-title">${escapeHtml(episode.title)}</span>
-                <div class="episode-badges">
-                  ${episode.is_next_up ? '<span class="badge next">Next Up</span>' : ""}
-                  <span class="badge ${episode.watched ? "watched" : episode.view_offset ? "in-progress" : "unwatched"}">
-                    ${episode.watched ? "Watched" : episode.view_offset ? "In Progress" : "Unwatched"}
-                  </span>
-                  <button class="play-btn" data-play-type="episode" data-play-id="${escapeHtml(episode.id)}" title="Play">
-                    <i data-lucide="play"></i>
-                  </button>
-                  <div class="overflow-menu">
-                    <button class="overflow-menu-trigger" aria-label="More options">
-                      <i data-lucide="ellipsis-vertical"></i>
+              <div class="episode-item-wrapper">
+                <div class="episode-item" data-episode-toggle>
+                  <span class="episode-num">E${String(episode.episode_number).padStart(2, "0")}</span>
+                  ${progressRing(episode.view_offset, episode.duration)}
+                  <span class="episode-title">${escapeHtml(episode.title)}</span>
+                  <div class="episode-badges">
+                    ${episode.is_next_up ? '<span class="badge next">Next Up</span>' : ""}
+                    <span class="badge ${episode.watched ? "watched" : episode.view_offset ? "in-progress" : "unwatched"}">
+                      ${episode.watched ? "Watched" : episode.view_offset ? "In Progress" : "Unwatched"}
+                    </span>
+                    <button class="play-btn" data-play-type="episode" data-play-id="${escapeHtml(episode.id)}" title="Play">
+                      <i data-lucide="play"></i>
                     </button>
-                    <div class="overflow-menu-dropdown">
-                      <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(episode.id)}" data-mark-watched="${episode.watched || episode.view_offset ? "false" : "true"}">
-                        <i data-lucide="${episode.watched || episode.view_offset ? "eye-off" : "eye"}"></i>
-                        ${episode.watched || episode.view_offset ? "Mark Unwatched" : "Mark Watched"}
+                    <div class="overflow-menu">
+                      <button class="overflow-menu-trigger" aria-label="More options">
+                        <i data-lucide="ellipsis-vertical"></i>
                       </button>
+                      <div class="overflow-menu-dropdown">
+                        <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(episode.id)}" data-mark-watched="${episode.watched || episode.view_offset ? "false" : "true"}">
+                          <i data-lucide="${episode.watched || episode.view_offset ? "eye-off" : "eye"}"></i>
+                          ${episode.watched || episode.view_offset ? "Mark Unwatched" : "Mark Watched"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
+                ${episode.summary ? `<div class="episode-summary">${escapeHtml(episode.summary)}</div>` : ""}
               </div>
             `,
               )
@@ -672,6 +675,14 @@ function renderTV() {
     await selectSeason(state.selectedSeasonId);
     renderTV();
     drawIcons();
+  });
+
+  content.querySelectorAll("[data-episode-toggle]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".play-btn, .overflow-menu")) return;
+      const wrapper = row.closest(".episode-item-wrapper");
+      if (wrapper) wrapper.classList.toggle("expanded");
+    });
   });
 }
 

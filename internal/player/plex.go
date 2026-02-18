@@ -30,6 +30,7 @@ type plexVideo struct {
 	RatingKey  string      `xml:"ratingKey,attr"`
 	SessionKey string      `xml:"sessionKey,attr"`
 	Duration   int64       `xml:"duration,attr"`
+	ViewOffset int64       `xml:"viewOffset,attr"`
 	Media      []plexMedia `xml:"Media"`
 }
 
@@ -42,9 +43,10 @@ type plexPart struct {
 }
 
 type PlexMetadata struct {
-	Title    string
-	PartKey  string
-	Duration int64 // milliseconds
+	Title      string
+	PartKey    string
+	Duration   int64 // milliseconds
+	ViewOffset int64 // milliseconds
 }
 
 func (c *PlexClient) TestConnection(ctx context.Context) (string, error) {
@@ -111,9 +113,10 @@ func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*Plex
 	}
 
 	return &PlexMetadata{
-		Title:    mc.Videos[0].Title,
-		PartKey:  mc.Videos[0].Media[0].Parts[0].Key,
-		Duration: mc.Videos[0].Duration,
+		Title:      mc.Videos[0].Title,
+		PartKey:    mc.Videos[0].Media[0].Parts[0].Key,
+		Duration:   mc.Videos[0].Duration,
+		ViewOffset: mc.Videos[0].ViewOffset,
 	}, nil
 }
 
@@ -175,6 +178,24 @@ func (c *PlexClient) Scrobble(ctx context.Context, ratingKey string) error {
 	c.setHeaders(req)
 
 	return c.doExpect2xx(req, "plex scrobble")
+}
+
+func (c *PlexClient) ClearProgress(ctx context.Context, ratingKey string) error {
+	params := url.Values{
+		"key":        {fmt.Sprintf("/library/metadata/%s", ratingKey)},
+		"identifier": {"com.plexapp.plugins.library"},
+		"time":       {"0"},
+		"state":      {"stopped"},
+	}
+	u := fmt.Sprintf("%s/:/progress?%s", c.BaseURL, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	return c.doExpect2xx(req, "plex clear progress")
 }
 
 func (c *PlexClient) Unscrobble(ctx context.Context, ratingKey string) error {

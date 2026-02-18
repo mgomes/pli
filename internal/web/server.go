@@ -641,9 +641,10 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 
 	streamURL := plexClient.StreamURL(meta.PartKey)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"stream_url":  streamURL,
-		"rating_key":  req.ID,
-		"duration_ms": meta.Duration,
+		"stream_url":     streamURL,
+		"rating_key":     req.ID,
+		"duration_ms":    meta.Duration,
+		"view_offset_ms": meta.ViewOffset,
 	})
 }
 
@@ -708,6 +709,10 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		err = plexClient.Scrobble(r.Context(), req.RatingKey)
 	} else {
 		err = plexClient.Unscrobble(r.Context(), req.RatingKey)
+		if err == nil {
+			// Also clear the resume position so playback starts from the beginning.
+			_ = plexClient.ClearProgress(r.Context(), req.RatingKey)
+		}
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

@@ -511,9 +511,9 @@ function renderMovieDetail(movie) {
           ${creditsHtml}
           ${mediaBadgesHtml}
           <div class="movie-detail-actions">
-            <button class="btn btn-primary" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
-              <i data-lucide="play"></i>
-              Play
+            <button class="movie-play-btn" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
+              <span class="movie-play-icon"><i data-lucide="play"></i></span>
+              <span class="movie-play-label">Play Movie</span>
             </button>
           </div>
         </div>
@@ -919,7 +919,9 @@ async function playItem(type, id) {
       if (result.duration_ms) {
         streamUrl.searchParams.set("X-Pli-Duration", String(result.duration_ms));
       }
+      streamUrl.searchParams.set("X-Pli-Start", String(result.view_offset_ms || 0));
       streamUrl.searchParams.set("X-Pli-Callback", window.location.origin + "/api/timeline");
+      streamUrl.searchParams.set("X-Pli-Session", String(Date.now()));
       window.location.href = "iina://weblink?url=" + encodeURIComponent(streamUrl.toString());
     }
   } catch (err) {

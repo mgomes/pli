@@ -516,6 +516,54 @@ body {
 .movie-detail-actions {
   display: flex;
   gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.movie-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: none;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  padding: 0 1.5rem 0 0;
+  height: 48px;
+  transition: filter 200ms, box-shadow 200ms, transform 150ms;
+  box-shadow: 0 0 20px hsl(var(--primary) / 0.25);
+}
+
+.movie-play-btn:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 0 28px hsl(var(--primary) / 0.4);
+  transform: scale(1.03);
+}
+
+.movie-play-btn:active {
+  transform: scale(0.98);
+}
+
+.movie-play-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.movie-play-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: hsl(var(--primary-foreground));
+}
+
+.movie-play-label {
+  padding-right: 0.25rem;
 }
 
 .movie-detail-tagline {

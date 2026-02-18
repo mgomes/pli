@@ -160,6 +160,62 @@ body {
   overflow-y: auto;
 }
 
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.search-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+}
+
+.search-input {
+  width: 220px;
+  padding: 0.45rem 0.75rem 0.45rem 2rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 150ms, width 200ms;
+}
+
+.search-input:focus {
+  border-color: hsl(var(--primary));
+  width: 300px;
+}
+
+.search-input::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+.search-section-title {
+  font-family: "Google Sans", system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground));
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
 .topbar h1 {
   font-family: "Google Sans", system-ui, sans-serif;
   font-size: 1.5rem;
@@ -213,6 +269,68 @@ body {
   padding: 4rem 2rem;
   color: hsl(var(--muted-foreground));
   font-size: 0.875rem;
+}
+
+/* ---- Continue Watching ---- */
+
+.cw-row {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.cw-row::-webkit-scrollbar {
+  height: 4px;
+}
+
+.cw-row::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 999px;
+}
+
+.cw-card {
+  flex-shrink: 0;
+  width: 140px;
+  scroll-snap-align: start;
+}
+
+.cw-card-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: hsl(var(--muted));
+}
+
+.cw-card-cover .progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+.cw-card-cover:hover .cover-play {
+  opacity: 1;
+}
+
+.cw-card-title {
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cw-card-sub {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- Media Cards (Recently Added) ---- */
@@ -334,6 +452,83 @@ body {
 .badge.next {
   background: hsl(var(--primary) / 0.15);
   color: hsl(38 90% 64%);
+}
+
+/* ---- Movie Toolbar ---- */
+
+.movie-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.toolbar-left {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.toolbar-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card))
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a7a7a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    right 0.6rem center / 12px no-repeat;
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 150ms, background-color 150ms;
+}
+
+.toolbar-select:hover {
+  border-color: hsl(var(--muted-foreground) / 0.3);
+  background-color: hsl(var(--muted));
+}
+
+.toolbar-select:focus {
+  border-color: hsl(var(--primary));
+}
+
+.filter-pills {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.filter-pill {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.filter-pill:hover {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--muted-foreground) / 0.3);
+}
+
+.filter-pill.active {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+.movie-count {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ---- Movie Index + A-Z Rail ---- */

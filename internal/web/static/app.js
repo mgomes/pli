@@ -4,6 +4,9 @@ const state = {
   recent: [],
   movies: [],
   selectedMovieId: null,
+  movieSort: "title-asc",
+  movieFilterGenre: "",
+  movieFilterWatch: "all",
   shows: [],
   selectedShowId: null,
   selectedShowTitle: "",
@@ -12,6 +15,8 @@ const state = {
   seasons: [],
   selectedSeasonId: null,
   episodes: [],
+  searchQuery: "",
+  continueWatching: [],
 };
 
 const sectionMeta = {
@@ -35,12 +40,22 @@ const sectionMeta = {
 
 window.addEventListener("DOMContentLoaded", async () => {
   wireSectionNav();
+  wireSearch();
   await loadConfig();
   window.addEventListener("popstate", () => {
     void navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
   });
   document.addEventListener("click", () => {
     document.querySelectorAll(".overflow-menu-dropdown.open").forEach((d) => d.classList.remove("open"));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
+      e.preventDefault();
+      const searchInput = document.getElementById("search-input");
+      if (searchInput) searchInput.focus();
+    }
   });
   await navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
 });
@@ -126,6 +141,9 @@ async function navigateToRoute(route, options = {}) {
 
   document.querySelector(".topbar").style.display = "";
   state.section = section;
+  state.searchQuery = "";
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) searchInput.value = "";
   setActiveButton(section);
   setHeader(sectionMeta[section].title, sectionMeta[section].description);
 
@@ -223,8 +241,20 @@ async function loadConfig() {
 }
 
 async function loadRecentlyAdded() {
-  const response = await fetchJSON("/api/recently-added");
-  state.recent = response.items ?? [];
+  const [recentRes] = await Promise.all([
+    fetchJSON("/api/recently-added"),
+    loadContinueWatching(),
+  ]);
+  state.recent = recentRes.items ?? [];
+}
+
+async function loadContinueWatching() {
+  try {
+    const response = await fetchJSON("/api/continue-watching");
+    state.continueWatching = response.items ?? [];
+  } catch {
+    state.continueWatching = [];
+  }
 }
 
 async function loadMovies() {
@@ -287,16 +317,151 @@ async function selectSeason(seasonId, rerender = true) {
   }
 }
 
+// ---- Search ----
+
+function wireSearch() {
+  const input = document.getElementById("search-input");
+  if (!input) return;
+
+  let debounceTimer;
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      const query = input.value.trim();
+      if (query.length < 2) {
+        if (state.searchQuery) {
+          state.searchQuery = "";
+          await navigateToRoute({ section: state.section }, { historyMode: "replace" });
+        }
+        return;
+      }
+      state.searchQuery = query;
+      await ensureSearchData();
+      const results = performSearch(query);
+      renderSearchResults(results);
+      drawIcons();
+    }, 200);
+  });
+}
+
+async function ensureSearchData() {
+  const promises = [];
+  if (!state.movies.length) promises.push(loadMovies());
+  if (!state.shows.length) promises.push(loadTVShows());
+  if (promises.length) await Promise.all(promises);
+}
+
+function performSearch(query) {
+  const q = query.toLowerCase();
+  const movies = state.movies.filter((m) => m.title.toLowerCase().includes(q));
+  const shows = state.shows.filter((s) => s.title.toLowerCase().includes(q));
+  return { movies, shows };
+}
+
+function renderSearchResults(results) {
+  const content = document.getElementById("content");
+  const { movies, shows } = results;
+
+  if (!movies.length && !shows.length) {
+    content.innerHTML = `<div class="empty-state">No results for "${escapeHtml(state.searchQuery)}"</div>`;
+    return;
+  }
+
+  let html = "";
+
+  if (shows.length) {
+    html += `<div class="search-section-title">TV Shows (${shows.length})</div>`;
+    html += `<div class="show-list">`;
+    html += shows
+      .map(
+        (show) => `
+        <div class="show-item" data-search-show-id="${escapeHtml(show.id)}">
+          <div class="show-item-cover">
+            ${renderCover(show.cover_url, show.title)}
+          </div>
+          <div class="show-item-info">
+            <div class="show-item-title">${escapeHtml(show.title)}</div>
+            <div class="show-item-meta">${show.watched_count}/${show.total_episodes} episodes</div>
+          </div>
+          <div class="show-item-chevron"><i data-lucide="chevron-right"></i></div>
+        </div>
+      `,
+      )
+      .join("");
+    html += `</div>`;
+  }
+
+  if (movies.length) {
+    html += `<div class="search-section-title">Movies (${movies.length})</div>`;
+    html += `<div class="movie-grid">${movies.map(movieCardHtml).join("")}</div>`;
+  }
+
+  content.innerHTML = html;
+  wirePlayButtons(content);
+
+  content.querySelectorAll("[data-search-show-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const showId = node.getAttribute("data-search-show-id");
+      if (showId) {
+        state.searchQuery = "";
+        const searchInput = document.getElementById("search-input");
+        if (searchInput) searchInput.value = "";
+        void navigateToRoute({ section: "tv", showId }, { historyMode: "push" });
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-movie-id]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const movieID = node.getAttribute("data-movie-id");
+      if (movieID) {
+        state.searchQuery = "";
+        const searchInput = document.getElementById("search-input");
+        if (searchInput) searchInput.value = "";
+        openMovieDetail(movieID);
+      }
+    });
+  });
+}
+
 // ---- Renderers ----
 
 function renderRecentlyAdded() {
   const content = document.getElementById("content");
-  if (!state.recent.length) {
+  if (!state.recent.length && !state.continueWatching.length) {
     content.innerHTML = `<div class="empty-state">No recent additions yet.</div>`;
     return;
   }
 
+  let cwHtml = "";
+  if (state.continueWatching.length) {
+    cwHtml = `
+      <div class="section-label">Continue Watching</div>
+      <div class="cw-row">
+        ${state.continueWatching
+          .map(
+            (item) => `
+          <div class="cw-card">
+            <div class="cw-card-cover">
+              ${renderCover(item.cover_url, item.title)}
+              <button class="play-btn cover-play" data-play-type="${escapeHtml(item.type)}" data-play-id="${escapeHtml(item.id)}" title="Play">
+                <i data-lucide="play"></i>
+              </button>
+              ${progressBar(item.view_offset, item.duration)}
+            </div>
+            <div class="cw-card-title">${escapeHtml(item.title)}</div>
+            ${item.subtitle ? `<div class="cw-card-sub">${escapeHtml(item.subtitle)}</div>` : ""}
+          </div>
+        `,
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
   content.innerHTML = `
+    ${cwHtml}
+    ${state.recent.length ? `<div class="section-label">Recently Added</div>` : ""}
     <div class="media-grid">
       ${state.recent
         .map(
@@ -339,6 +504,74 @@ function renderRecentlyAdded() {
   });
 }
 
+function movieCardHtml(movie) {
+  return `
+    <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
+      <div class="movie-card-cover">
+        ${renderCover(movie.cover_url, movie.title)}
+        <span class="badge cover-badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
+          ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
+        </span>
+        <button class="play-btn cover-play" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
+          <i data-lucide="play"></i>
+        </button>
+        ${progressBar(movie.view_offset, movie.duration)}
+      </div>
+      <div class="movie-card-year">${movie.year}</div>
+      <div class="movie-card-title">${escapeHtml(movie.title)}</div>
+    </article>
+  `;
+}
+
+function collectGenres(movies) {
+  const set = new Set();
+  for (const movie of movies) {
+    if (movie.genres) {
+      for (const g of movie.genres) set.add(g);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function getFilteredSortedMovies() {
+  let list = state.movies;
+
+  if (state.movieFilterGenre) {
+    list = list.filter((m) => m.genres && m.genres.includes(state.movieFilterGenre));
+  }
+
+  if (state.movieFilterWatch === "unwatched") {
+    list = list.filter((m) => !m.watched && !m.view_offset);
+  } else if (state.movieFilterWatch === "in-progress") {
+    list = list.filter((m) => !m.watched && m.view_offset);
+  } else if (state.movieFilterWatch === "watched") {
+    list = list.filter((m) => m.watched);
+  }
+
+  const sorted = [...list];
+  switch (state.movieSort) {
+    case "title-desc":
+      sorted.sort((a, b) => b.title.localeCompare(a.title));
+      break;
+    case "year-desc":
+      sorted.sort((a, b) => b.year - a.year || a.title.localeCompare(b.title));
+      break;
+    case "year-asc":
+      sorted.sort((a, b) => a.year - b.year || a.title.localeCompare(b.title));
+      break;
+    case "rating-desc":
+      sorted.sort((a, b) => (parseFloat(b.audience_rating) || 0) - (parseFloat(a.audience_rating) || 0) || a.title.localeCompare(b.title));
+      break;
+    case "added-desc":
+      sorted.sort((a, b) => (b.added_at || "").localeCompare(a.added_at || "") || a.title.localeCompare(b.title));
+      break;
+    default:
+      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+  }
+  return sorted;
+}
+
 function renderMovies() {
   const content = document.getElementById("content");
   if (!state.movies.length) {
@@ -346,76 +579,127 @@ function renderMovies() {
     return;
   }
 
-  // Group movies by first letter
-  const groups = new Map();
-  for (const movie of state.movies) {
-    const first = (movie.title || "").charAt(0).toUpperCase();
-    const letter = /[A-Z]/.test(first) ? first : "#";
-    if (!groups.has(letter)) groups.set(letter, []);
-    groups.get(letter).push(movie);
-  }
+  const genres = collectGenres(state.movies);
+  const filtered = getFilteredSortedMovies();
+  const useAZRail = state.movieSort === "title-asc" && !state.movieFilterGenre && state.movieFilterWatch === "all";
 
-  const allLetters = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-  const activeLetters = new Set(groups.keys());
+  const watchOptions = [
+    { value: "all", label: "All" },
+    { value: "unwatched", label: "Unwatched" },
+    { value: "in-progress", label: "In Progress" },
+    { value: "watched", label: "Watched" },
+  ];
 
-  const railHtml = allLetters
-    .map((l) => {
-      const active = activeLetters.has(l);
-      return `<button class="az-letter ${active ? "" : "disabled"}" ${active ? `data-az-jump="${l}"` : ""}>${l}</button>`;
-    })
-    .join("");
-
-  let gridHtml = "";
-  for (const letter of allLetters) {
-    const movies = groups.get(letter);
-    if (!movies) continue;
-    gridHtml += `<div class="movie-grid-letter" id="az-${letter}">${letter}</div>`;
-    gridHtml += movies
-      .map(
-        (movie) => `
-        <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
-          <div class="movie-card-cover">
-            ${renderCover(movie.cover_url, movie.title)}
-            <span class="badge cover-badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
-              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
-            </span>
-            <button class="play-btn cover-play" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
-              <i data-lucide="play"></i>
-            </button>
-            ${progressBar(movie.view_offset, movie.duration)}
-          </div>
-          <div class="movie-card-year">${movie.year}</div>
-          <div class="movie-card-title">${escapeHtml(movie.title)}</div>
-        </article>
-      `,
-      )
-      .join("");
-  }
-
-  content.innerHTML = `
-    <div class="movie-index">
-      <div class="movie-grid">${gridHtml}</div>
-      <nav class="az-rail">${railHtml}</nav>
+  const toolbarHtml = `
+    <div class="movie-toolbar">
+      <div class="toolbar-left">
+        <select class="toolbar-select" id="movie-sort">
+          <option value="title-asc"${state.movieSort === "title-asc" ? " selected" : ""}>Title A–Z</option>
+          <option value="title-desc"${state.movieSort === "title-desc" ? " selected" : ""}>Title Z–A</option>
+          <option value="year-desc"${state.movieSort === "year-desc" ? " selected" : ""}>Newest</option>
+          <option value="year-asc"${state.movieSort === "year-asc" ? " selected" : ""}>Oldest</option>
+          <option value="rating-desc"${state.movieSort === "rating-desc" ? " selected" : ""}>Top Rated</option>
+          <option value="added-desc"${state.movieSort === "added-desc" ? " selected" : ""}>Recently Added</option>
+        </select>
+        <select class="toolbar-select" id="movie-genre">
+          <option value="">All Genres</option>
+          ${genres.map((g) => `<option value="${escapeHtml(g)}"${state.movieFilterGenre === g ? " selected" : ""}>${escapeHtml(g)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="filter-pills">
+        ${watchOptions.map((o) => `<button class="filter-pill${state.movieFilterWatch === o.value ? " active" : ""}" data-watch-filter="${o.value}">${o.label}</button>`).join("")}
+      </div>
     </div>
   `;
 
-  wirePlayButtons(content);
+  let gridHtml = "";
+  if (useAZRail) {
+    const groups = new Map();
+    for (const movie of filtered) {
+      const first = (movie.title || "").charAt(0).toUpperCase();
+      const letter = /[A-Z]/.test(first) ? first : "#";
+      if (!groups.has(letter)) groups.set(letter, []);
+      groups.get(letter).push(movie);
+    }
 
-  content.querySelectorAll("[data-az-jump]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const letter = btn.getAttribute("data-az-jump");
-      const target = document.getElementById("az-" + letter);
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    const allLetters = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    const activeLetters = new Set(groups.keys());
+
+    const railHtml = allLetters
+      .map((l) => {
+        const active = activeLetters.has(l);
+        return `<button class="az-letter ${active ? "" : "disabled"}" ${active ? `data-az-jump="${l}"` : ""}>${l}</button>`;
+      })
+      .join("");
+
+    for (const letter of allLetters) {
+      const movies = groups.get(letter);
+      if (!movies) continue;
+      gridHtml += `<div class="movie-grid-letter" id="az-${letter}">${letter}</div>`;
+      gridHtml += movies.map(movieCardHtml).join("");
+    }
+
+    content.innerHTML = `
+      ${toolbarHtml}
+      <div class="movie-index">
+        <div class="movie-grid">${gridHtml}</div>
+        <nav class="az-rail">${railHtml}</nav>
+      </div>
+    `;
+
+    content.querySelectorAll("[data-az-jump]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const letter = btn.getAttribute("data-az-jump");
+        const target = document.getElementById("az-" + letter);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
-  });
+  } else {
+    gridHtml = filtered.map(movieCardHtml).join("");
+
+    content.innerHTML = `
+      ${toolbarHtml}
+      <div class="movie-count">${filtered.length} movie${filtered.length !== 1 ? "s" : ""}</div>
+      <div class="movie-grid">${gridHtml}</div>
+    `;
+  }
+
+  wirePlayButtons(content);
+  wireMovieToolbar(content);
 
   content.querySelectorAll("[data-movie-id]").forEach((node) => {
     node.addEventListener("click", () => {
       const movieID = node.getAttribute("data-movie-id");
-      if (!movieID) {
-        return;
-      }
+      if (!movieID) return;
       openMovieDetail(movieID);
+    });
+  });
+}
+
+function wireMovieToolbar(container) {
+  const sortSelect = container.querySelector("#movie-sort");
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => {
+      state.movieSort = sortSelect.value;
+      renderMovies();
+      drawIcons();
+    });
+  }
+
+  const genreSelect = container.querySelector("#movie-genre");
+  if (genreSelect) {
+    genreSelect.addEventListener("change", () => {
+      state.movieFilterGenre = genreSelect.value;
+      renderMovies();
+      drawIcons();
+    });
+  }
+
+  container.querySelectorAll("[data-watch-filter]").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      state.movieFilterWatch = pill.getAttribute("data-watch-filter");
+      renderMovies();
+      drawIcons();
     });
   });
 }

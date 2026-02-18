@@ -80,6 +80,16 @@ type PlexEpisode struct {
 	CoverPath     string
 }
 
+type PlexContinueWatchingItem struct {
+	ID         string
+	Type       string
+	Title      string
+	Subtitle   string
+	CoverPath  string
+	ViewOffset int64
+	Duration   int64
+}
+
 type browseContainer struct {
 	XMLName     xml.Name          `xml:"MediaContainer"`
 	Directories []browseDirectory `xml:"Directory"`
@@ -190,6 +200,44 @@ func (c *PlexClient) FetchRecentlyAdded(ctx context.Context, limit int) ([]PlexR
 		case "movie":
 			if v.Year > 0 {
 				item.Subline = strconv.FormatInt(v.Year, 10)
+			}
+		}
+
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+func (c *PlexClient) FetchContinueWatching(ctx context.Context) ([]PlexContinueWatchingItem, error) {
+	var container browseContainer
+	if err := c.doXML(ctx, "/library/onDeck", &container); err != nil {
+		return nil, err
+	}
+
+	items := make([]PlexContinueWatchingItem, 0, len(container.Videos))
+	for _, v := range container.Videos {
+		ratingKey := strings.TrimSpace(v.RatingKey)
+		if ratingKey == "" {
+			continue
+		}
+
+		item := PlexContinueWatchingItem{
+			ID:         ratingKey,
+			Type:       v.Type,
+			Title:      v.Title,
+			CoverPath:  firstNonEmpty(v.GrandparentThumb, v.ParentThumb, v.Thumb),
+			ViewOffset: v.ViewOffset,
+			Duration:   v.Duration,
+		}
+
+		switch v.Type {
+		case "episode":
+			item.Title = safeTitle(v.GrandparentTitle)
+			item.Subtitle = fmt.Sprintf("S%02dE%02d · %s", v.ParentIndex, v.Index, v.Title)
+		case "movie":
+			if v.Year > 0 {
+				item.Subtitle = strconv.FormatInt(v.Year, 10)
 			}
 		}
 

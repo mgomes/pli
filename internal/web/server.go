@@ -97,6 +97,16 @@ type tvSeasonItem struct {
 	TotalEpisodes int64  `json:"total_episodes"`
 }
 
+type continueWatchingItem struct {
+	Type       string `json:"type"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Subtitle   string `json:"subtitle,omitempty"`
+	CoverURL   string `json:"cover_url"`
+	ViewOffset int64  `json:"view_offset,omitempty"`
+	Duration   int64  `json:"duration,omitempty"`
+}
+
 type tvEpisodeItem struct {
 	ID            string `json:"id"`
 	SeasonNumber  int64  `json:"season_number"`
@@ -156,6 +166,7 @@ func (s *Server) router() http.Handler {
 		r.Get("/config", s.handleConfig)
 		r.Put("/config", s.handleUpdateConfig)
 		r.Get("/recently-added", s.handleRecentlyAdded)
+		r.Get("/continue-watching", s.handleContinueWatching)
 		r.Get("/movies", s.handleMovies)
 		r.Get("/tv/shows", s.handleTVShows)
 		r.Get("/tv/shows/{showID}/seasons", s.handleTVSeasons)
@@ -364,6 +375,35 @@ func (s *Server) handleRecentlyAdded(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("X-Cache", "MISS")
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleContinueWatching(w http.ResponseWriter, r *http.Request) {
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	rows, err := plexClient.FetchContinueWatching(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	items := make([]continueWatchingItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, continueWatchingItem{
+			Type:       row.Type,
+			ID:         row.ID,
+			Title:      row.Title,
+			Subtitle:   row.Subtitle,
+			CoverURL:   s.plexImageURL(row.CoverPath),
+			ViewOffset: row.ViewOffset,
+			Duration:   row.Duration,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (s *Server) handleMovies(w http.ResponseWriter, r *http.Request) {

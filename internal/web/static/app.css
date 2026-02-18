@@ -216,6 +216,63 @@ body {
   margin-bottom: 0.5rem;
 }
 
+.search-loading {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 0.25rem;
+}
+
+.episode-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.episode-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  cursor: pointer;
+}
+
+.episode-search-item:hover {
+  border-color: hsl(var(--muted-foreground) / 0.3);
+}
+
+.episode-search-main {
+  min-width: 0;
+}
+
+.episode-search-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode-search-meta {
+  font-size: 0.78rem;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode-search-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
 .topbar h1 {
   font-family: "Google Sans", system-ui, sans-serif;
   font-size: 1.5rem;
@@ -295,6 +352,7 @@ body {
   flex-shrink: 0;
   width: 140px;
   scroll-snap-align: start;
+  cursor: pointer;
 }
 
 .cw-card-cover {
@@ -1059,6 +1117,20 @@ body {
   flex-wrap: wrap;
 }
 
+.switch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+  color: hsl(var(--muted-foreground));
+  user-select: none;
+}
+
+.switch-control input {
+  accent-color: hsl(var(--primary));
+}
+
 .season-tab {
   padding: 0.4rem 0.75rem;
   border: 1px solid hsl(var(--border));
@@ -1097,6 +1169,10 @@ body {
 
 .episode-item-wrapper:last-child {
   border-bottom: none;
+}
+
+.episode-item-wrapper.episode-highlight .episode-item {
+  background: hsl(var(--primary) / 0.12);
 }
 
 .episode-item {

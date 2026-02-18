@@ -49,10 +49,12 @@ type PlexMovie struct {
 type PlexShow struct {
 	ID            string
 	Title         string
+	Summary       string
 	WatchedCount  int64
 	TotalEpisodes int64
 	NextUp        string
 	CoverPath     string
+	ArtPath       string
 }
 
 type PlexSeason struct {
@@ -90,6 +92,8 @@ type browseDirectory struct {
 	Type            string `xml:"type,attr"`
 	Title           string `xml:"title,attr"`
 	Thumb           string `xml:"thumb,attr"`
+	Art             string `xml:"art,attr"`
+	Summary         string `xml:"summary,attr"`
 	LeafCount       int64  `xml:"leafCount,attr"`
 	ViewedLeafCount int64  `xml:"viewedLeafCount,attr"`
 	Index           int64  `xml:"index,attr"`
@@ -319,10 +323,12 @@ func (c *PlexClient) FetchTVShows(ctx context.Context) ([]PlexShow, error) {
 			shows = append(shows, PlexShow{
 				ID:            showID,
 				Title:         d.Title,
+				Summary:       strings.TrimSpace(d.Summary),
 				WatchedCount:  d.ViewedLeafCount,
 				TotalEpisodes: d.LeafCount,
 				NextUp:        nextUp,
 				CoverPath:     d.Thumb,
+				ArtPath:       strings.TrimSpace(d.Art),
 			})
 		}
 	}
@@ -345,9 +351,11 @@ func (c *PlexClient) FetchShow(ctx context.Context, showID string) (*PlexShow, e
 		return &PlexShow{
 			ID:            ratingKeyFromDirectory(d),
 			Title:         safeTitle(d.Title),
+			Summary:       strings.TrimSpace(d.Summary),
 			WatchedCount:  d.ViewedLeafCount,
 			TotalEpisodes: d.LeafCount,
 			CoverPath:     d.Thumb,
+			ArtPath:       strings.TrimSpace(d.Art),
 		}, nil
 	}
 
@@ -361,9 +369,11 @@ func (c *PlexClient) FetchShow(ctx context.Context, showID string) (*PlexShow, e
 		return &PlexShow{
 			ID:            id,
 			Title:         safeTitle(v.Title),
+			Summary:       strings.TrimSpace(v.Summary),
 			WatchedCount:  v.ViewedLeafCount,
 			TotalEpisodes: v.LeafCount,
 			CoverPath:     firstNonEmpty(v.Thumb, v.ParentThumb, v.GrandparentThumb),
+			ArtPath:       strings.TrimSpace(v.Art),
 		}, nil
 	}
 

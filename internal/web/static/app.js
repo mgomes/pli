@@ -7,6 +7,8 @@ const state = {
   shows: [],
   selectedShowId: null,
   selectedShowTitle: "",
+  selectedShowSummary: "",
+  selectedShowArtUrl: "",
   seasons: [],
   selectedSeasonId: null,
   episodes: [],
@@ -36,6 +38,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadConfig();
   window.addEventListener("popstate", () => {
     void navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
+  });
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".overflow-menu-dropdown.open").forEach((d) => d.classList.remove("open"));
   });
   await navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
 });
@@ -201,9 +206,14 @@ function setActiveButton(section) {
   });
 }
 
-function setHeader(title, description) {
+function setHeader(title, description, { html = false } = {}) {
   document.getElementById("section-title").textContent = title;
-  document.getElementById("section-description").textContent = description;
+  const desc = document.getElementById("section-description");
+  if (html) {
+    desc.innerHTML = description;
+  } else {
+    desc.textContent = description;
+  }
 }
 
 async function loadConfig() {
@@ -231,6 +241,8 @@ async function loadTVShows() {
     state.seasons = [];
     state.episodes = [];
     state.selectedShowTitle = "";
+    state.selectedShowSummary = "";
+    state.selectedShowArtUrl = "";
     return;
   }
 
@@ -245,6 +257,8 @@ async function selectShow(showId) {
   state.selectedShowId = showId;
   const response = await fetchJSON(`/api/tv/shows/${encodeURIComponent(showId)}/seasons`);
   state.selectedShowTitle = response.show?.title ?? "";
+  state.selectedShowSummary = response.show?.summary ?? "";
+  state.selectedShowArtUrl = response.show?.art_url ?? "";
   state.seasons = response.seasons ?? [];
 
   if (!state.seasons.length) {
@@ -339,18 +353,16 @@ function renderMovies() {
         <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
           <div class="movie-card-cover">
             ${renderCover(movie.cover_url, movie.title)}
+            <span class="badge cover-badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
+              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
+            </span>
+            <button class="play-btn cover-play" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
+              <i data-lucide="play"></i>
+            </button>
             ${progressBar(movie.view_offset, movie.duration)}
           </div>
           <div class="movie-card-year">${movie.year}</div>
           <div class="movie-card-title">${escapeHtml(movie.title)}</div>
-          <div class="movie-card-footer">
-            <span class="badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
-              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
-            </span>
-            <button class="play-btn" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}" title="Play">
-              <i data-lucide="play"></i>
-            </button>
-          </div>
         </article>
       `,
         )
@@ -377,8 +389,9 @@ async function openMovieDetail(movieID, options = {}) {
     return;
   }
   state.selectedMovieId = movie.id;
-  const watchStatus = movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched";
-  setHeader(movie.title, `Released ${movie.year || "Unknown"} · ${watchStatus}`);
+  const badgeClass = movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched";
+  const badgeLabel = movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched";
+  setHeader(movie.title, `Released ${movie.year || "Unknown"} <span class="badge ${badgeClass}">${badgeLabel}</span>`, { html: true });
   renderMovieDetail(movie);
   if (historyMode !== "none") {
     setRoute({ section: "movies", movieId: movie.id }, historyMode);
@@ -457,13 +470,27 @@ function renderMovieDetail(movie) {
     mediaBadgesHtml = `<div class="movie-detail-media-info">${badges.map((b) => `<span class="movie-detail-media-badge">${escapeHtml(b)}</span>`).join("")}</div>`;
   }
 
+  const isWatchedOrProgress = movie.watched || movie.view_offset;
   content.innerHTML = `
     <article class="movie-detail-card"${movie.art_url ? ` style="--bg-art: url(${escapeHtml(movie.art_url)})"` : ""}>
       <div class="movie-detail-backdrop"></div>
-      <button class="btn btn-secondary movie-detail-back" id="movie-detail-back">
-        <i data-lucide="arrow-left"></i>
-        Back to Movies
-      </button>
+      <div class="movie-detail-topbar">
+        <button class="btn btn-secondary movie-detail-back" id="movie-detail-back">
+          <i data-lucide="arrow-left"></i>
+          Back to Movies
+        </button>
+        <div class="overflow-menu">
+          <button class="overflow-menu-trigger" aria-label="More options">
+            <i data-lucide="ellipsis-vertical"></i>
+          </button>
+          <div class="overflow-menu-dropdown">
+            <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(movie.id)}" data-mark-watched="${isWatchedOrProgress ? "false" : "true"}">
+              <i data-lucide="${isWatchedOrProgress ? "eye-off" : "eye"}"></i>
+              ${isWatchedOrProgress ? "Mark Unwatched" : "Mark Watched"}
+            </button>
+          </div>
+        </div>
+      </div>
       <div class="movie-detail-layout">
         <div class="movie-detail-cover">
             ${renderCover(movie.cover_url, movie.title)}
@@ -479,9 +506,6 @@ function renderMovieDetail(movie) {
           ${creditsHtml}
           ${mediaBadgesHtml}
           <div class="movie-detail-actions">
-            <span class="badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
-              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
-            </span>
             <button class="btn btn-primary" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
               <i data-lucide="play"></i>
               Play
@@ -501,6 +525,7 @@ function renderMovieDetail(movie) {
   });
 
   wirePlayButtons(content);
+  wireOverflowMenus(content, () => openMovieDetail(movie.id, { historyMode: "replace" }));
 }
 
 function renderTV() {
@@ -545,9 +570,11 @@ function renderTV() {
         </div>
       </section>
 
-      <section class="tv-right">
+      <section class="tv-right"${state.selectedShowArtUrl ? ` style="--bg-art: url(${escapeHtml(state.selectedShowArtUrl)})"` : ""}>
+        <div class="tv-right-backdrop"></div>
         <div>
           <div class="section-label">${escapeHtml(state.selectedShowTitle || "Seasons")}</div>
+          ${state.selectedShowSummary ? `<p class="tv-show-summary">${escapeHtml(state.selectedShowSummary)}</p>` : ""}
           <div class="season-tabs">
             ${state.seasons
               .map(
@@ -582,6 +609,17 @@ function renderTV() {
                   <button class="play-btn" data-play-type="episode" data-play-id="${escapeHtml(episode.id)}" title="Play">
                     <i data-lucide="play"></i>
                   </button>
+                  <div class="overflow-menu">
+                    <button class="overflow-menu-trigger" aria-label="More options">
+                      <i data-lucide="ellipsis-vertical"></i>
+                    </button>
+                    <div class="overflow-menu-dropdown">
+                      <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(episode.id)}" data-mark-watched="${episode.watched || episode.view_offset ? "false" : "true"}">
+                        <i data-lucide="${episode.watched || episode.view_offset ? "eye-off" : "eye"}"></i>
+                        ${episode.watched || episode.view_offset ? "Mark Unwatched" : "Mark Watched"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             `,
@@ -624,6 +662,11 @@ function renderTV() {
   });
 
   wirePlayButtons(content);
+  wireOverflowMenus(content, async () => {
+    await selectSeason(state.selectedSeasonId);
+    renderTV();
+    drawIcons();
+  });
 }
 
 function renderSettings() {
@@ -865,6 +908,39 @@ async function playItem(type, id) {
   } catch (err) {
     console.error("play failed:", err.message);
   }
+}
+
+function wireOverflowMenus(container, onUpdate) {
+  container.querySelectorAll(".overflow-menu").forEach((menu) => {
+    const trigger = menu.querySelector(".overflow-menu-trigger");
+    const dropdown = menu.querySelector(".overflow-menu-dropdown");
+    if (!trigger || !dropdown) return;
+
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // Close any other open menus
+      document.querySelectorAll(".overflow-menu-dropdown.open").forEach((d) => {
+        if (d !== dropdown) d.classList.remove("open");
+      });
+      dropdown.classList.toggle("open");
+    });
+
+    menu.querySelectorAll("[data-toggle-watched]").forEach((item) => {
+      item.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const ratingKey = item.getAttribute("data-rating-key");
+        const markWatched = item.getAttribute("data-mark-watched") === "true";
+        dropdown.classList.remove("open");
+        try {
+          await postJSON("/api/watched", { rating_key: ratingKey, watched: markWatched });
+          if (onUpdate) await onUpdate();
+        } catch (err) {
+          console.error("toggle watched failed:", err.message);
+        }
+      });
+    });
+  });
+
 }
 
 function wirePlayButtons(container) {

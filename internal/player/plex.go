@@ -177,6 +177,22 @@ func (c *PlexClient) Scrobble(ctx context.Context, ratingKey string) error {
 	return c.doExpect2xx(req, "plex scrobble")
 }
 
+func (c *PlexClient) Unscrobble(ctx context.Context, ratingKey string) error {
+	params := url.Values{
+		"key":        {ratingKey},
+		"identifier": {"com.plexapp.plugins.library"},
+	}
+	u := fmt.Sprintf("%s/:/unscrobble?%s", c.BaseURL, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	return c.doExpect2xx(req, "plex unscrobble")
+}
+
 func (c *PlexClient) doExpect2xx(req *http.Request, op string) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

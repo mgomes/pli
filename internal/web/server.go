@@ -81,10 +81,12 @@ type movieItem struct {
 type tvShowItem struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
 	WatchedCount  int64  `json:"watched_count"`
 	TotalEpisodes int64  `json:"total_episodes"`
 	NextUp        string `json:"next_up"`
 	CoverURL      string `json:"cover_url"`
+	ArtURL        string `json:"art_url,omitempty"`
 }
 
 type tvSeasonItem struct {
@@ -163,6 +165,7 @@ func (s *Server) router() http.Handler {
 		r.Get("/plex/auth/poll/{pinID}", s.handlePlexAuthPoll)
 		r.Post("/play", s.handlePlay)
 		r.Post("/timeline", s.handleTimeline)
+		r.Post("/watched", s.handleWatched)
 		r.Get("/sessions", s.handleSessions)
 	})
 
@@ -423,10 +426,12 @@ func (s *Server) handleTVShows(w http.ResponseWriter, r *http.Request) {
 		shows = append(shows, tvShowItem{
 			ID:            row.ID,
 			Title:         row.Title,
+			Summary:       row.Summary,
 			WatchedCount:  row.WatchedCount,
 			TotalEpisodes: row.TotalEpisodes,
 			NextUp:        row.NextUp,
 			CoverURL:      s.plexImageURL(row.CoverPath),
+			ArtURL:        s.plexImageURL(row.ArtPath),
 		})
 	}
 
@@ -486,8 +491,10 @@ func (s *Server) handleTVSeasons(w http.ResponseWriter, r *http.Request) {
 		"show": map[string]any{
 			"id":        show.ID,
 			"title":     show.Title,
+			"summary":   show.Summary,
 			"next_up":   nextUp,
 			"cover_url": s.plexImageURL(show.CoverPath),
+			"art_url":   s.plexImageURL(show.ArtPath),
 		},
 		"seasons": seasons,
 	})
@@ -670,6 +677,39 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		if err := plexClient.Scrobble(r.Context(), req.RatingKey); err != nil {
 			log.Printf("scrobble error for %s: %v", req.RatingKey, err)
 		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RatingKey string `json:"rating_key"`
+		Watched   bool   `json:"watched"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RatingKey == "" {
+		writeError(w, http.StatusBadRequest, "rating_key is required")
+		return
+	}
+
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	if req.Watched {
+		err = plexClient.Scrobble(r.Context(), req.RatingKey)
+	} else {
+		err = plexClient.Unscrobble(r.Context(), req.RatingKey)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

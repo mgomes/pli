@@ -124,6 +124,7 @@ async function navigateToRoute(route, options = {}) {
   const { historyMode = "push" } = options;
   const section = route.section || "recently-added";
 
+  document.querySelector(".topbar").style.display = "";
   state.section = section;
   setActiveButton(section);
   setHeader(sectionMeta[section].title, sectionMeta[section].description);
@@ -389,9 +390,7 @@ async function openMovieDetail(movieID, options = {}) {
     return;
   }
   state.selectedMovieId = movie.id;
-  const badgeClass = movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched";
-  const badgeLabel = movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched";
-  setHeader(movie.title, `Released ${movie.year || "Unknown"} <span class="badge ${badgeClass}">${badgeLabel}</span>`, { html: true });
+  document.querySelector(".topbar").style.display = "none";
   renderMovieDetail(movie);
   if (historyMode !== "none") {
     setRoute({ section: "movies", movieId: movie.id }, historyMode);
@@ -499,7 +498,13 @@ function renderMovieDetail(movie) {
         <div class="movie-detail-body">
           <h2 class="movie-detail-title">${escapeHtml(movie.title)}</h2>
           ${movie.tagline ? `<p class="movie-detail-tagline">${escapeHtml(movie.tagline)}</p>` : ""}
-          ${metaLine ? `<div class="movie-detail-meta-line">${metaLine}</div>` : ""}
+          <div class="movie-detail-meta-line">
+            ${metaLine}
+            ${metaLine ? '<span class="sep">&middot;</span>' : ""}
+            <span class="badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
+              ${movie.watched ? "Watched" : movie.view_offset ? "In Progress" : "Unwatched"}
+            </span>
+          </div>
           ${ratingsHtml}
           ${genresHtml}
           ${summaryHtml}
@@ -518,6 +523,7 @@ function renderMovieDetail(movie) {
 
   document.getElementById("movie-detail-back").addEventListener("click", () => {
     state.selectedMovieId = null;
+    document.querySelector(".topbar").style.display = "";
     setHeader(sectionMeta.movies.title, sectionMeta.movies.description);
     renderMovies();
     setRoute({ section: "movies" }, "push");

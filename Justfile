@@ -2,6 +2,7 @@ set shell := ["bash", "-cu"]
 
 app_addr := env_var_or_default("PLI_ADDR", ":8080")
 db_path := env_var_or_default("PLI_DB_PATH", "data/pli.db")
+bin_path := env_var_or_default("PLI_BIN_PATH", "bin/pli")
 # Boot the web server.
 serve:
 	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod"
@@ -12,10 +13,10 @@ test:
 	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod"
 	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go test ./...
 
-# Build all packages.
+# Build the pli binary.
 build:
-	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod"
-	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go build ./...
+	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod" "$(dirname "{{bin_path}}")"
+	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go build -o "{{bin_path}}" ./cmd/pli
 
 # Refresh sqlc-generated query code.
 sqlc:

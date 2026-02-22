@@ -20,8 +20,10 @@ Open:
 
 ## Environment
 
-- `PLI_ADDR` (default `:8080`)
+- `PLI_ADDR` (default `0.0.0.0:8080`)
 - `PLI_DB_PATH` (default `data/pli.db`)
+
+By default, the app listens on `0.0.0.0:8080` (all interfaces).
 
 ## SQLite + sqlc
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -97,13 +98,29 @@ func Run(ctx context.Context, addr, dbPath string) error {
 		}
 	}()
 
-	log.Printf("pli web app listening on http://localhost%s", addr)
+	logStartupAddress(addr)
 	err = httpServer.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 
 	return nil
+}
+
+func logStartupAddress(addr string) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		log.Printf("pli web app listening on %s", addr)
+		return
+	}
+
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		log.Printf("pli web app listening on http://0.0.0.0:%s (all interfaces)", port)
+		log.Printf("local access: http://localhost:%s", port)
+		return
+	}
+
+	log.Printf("pli web app listening on http://%s:%s", host, port)
 }
 
 func openDatabase(ctx context.Context, dbPath string) (*sql.DB, *db.Queries, error) {

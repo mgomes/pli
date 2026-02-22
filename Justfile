@@ -1,6 +1,6 @@
 set shell := ["bash", "-cu"]
 
-app_addr := env_var_or_default("PLI_ADDR", ":8080")
+app_addr := env_var_or_default("PLI_ADDR", "0.0.0.0:8080")
 db_path := env_var_or_default("PLI_DB_PATH", "data/pli.db")
 bin_path := env_var_or_default("PLI_BIN_PATH", "bin/pli")
 # Boot the web server.

@@ -72,44 +72,57 @@ func TestStreamURLBuildsValidURL(t *testing.T) {
 		baseURL     string
 		partKey     string
 		token       string
+		wantScheme  string
+		wantHost    string
 		wantPath    string
 		wantToken   string
 		wantQueryKV map[string]string
 	}{
 		{
-			name:      "relative path no query",
-			baseURL:   "http://127.0.0.1:32400",
-			partKey:   "/library/parts/123/file.mkv",
-			token:     "abc123",
-			wantPath:  "/library/parts/123/file.mkv",
-			wantToken: "abc123",
+			name:       "relative path no query",
+			baseURL:    "http://127.0.0.1:32400",
+			partKey:    "/library/parts/123/file.mkv",
+			token:      "abc123",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1:32400",
+			wantPath:   "/library/parts/123/file.mkv",
+			wantToken:  "abc123",
 		},
 		{
-			name:      "preserves existing query",
-			baseURL:   "http://127.0.0.1:32400",
-			partKey:   "/library/parts/123/file.mkv?download=1",
-			token:     "abc123",
-			wantPath:  "/library/parts/123/file.mkv",
-			wantToken: "abc123",
+			name:       "preserves existing query",
+			baseURL:    "http://127.0.0.1:32400",
+			partKey:    "/library/parts/123/file.mkv?download=1",
+			token:      "abc123",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1:32400",
+			wantPath:   "/library/parts/123/file.mkv",
+			wantToken:  "abc123",
 			wantQueryKV: map[string]string{
 				"download": "1",
 			},
 		},
 		{
-			name:      "does not override existing token",
-			baseURL:   "http://127.0.0.1:32400",
-			partKey:   "/library/parts/123/file.mkv?X-Plex-Token=from-part",
-			token:     "from-client",
-			wantPath:  "/library/parts/123/file.mkv",
-			wantToken: "from-part",
+			name:       "does not override existing token",
+			baseURL:    "http://127.0.0.1:32400",
+			partKey:    "/library/parts/123/file.mkv?X-Plex-Token=from-part",
+			token:      "from-client",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1:32400",
+			wantPath:   "/library/parts/123/file.mkv",
+			wantToken:  "from-part",
 		},
 		{
-			name:      "absolute part url",
-			baseURL:   "http://127.0.0.1:32400",
-			partKey:   "https://plex.example.com/library/parts/123/file.mkv",
-			token:     "abc123",
-			wantPath:  "/library/parts/123/file.mkv",
-			wantToken: "abc123",
+			name:       "absolute part URL uses configured server",
+			baseURL:    "https://plex.example.com",
+			partKey:    "http://localhost:32400/library/parts/123/file.mkv?download=1",
+			token:      "abc123",
+			wantScheme: "https",
+			wantHost:   "plex.example.com",
+			wantPath:   "/library/parts/123/file.mkv",
+			wantToken:  "abc123",
+			wantQueryKV: map[string]string{
+				"download": "1",
+			},
 		},
 	}
 
@@ -124,6 +137,12 @@ func TestStreamURLBuildsValidURL(t *testing.T) {
 			parsed, err := url.Parse(raw)
 			if err != nil {
 				t.Fatalf("StreamURL() returned invalid URL %q: %v", raw, err)
+			}
+			if parsed.Scheme != tc.wantScheme {
+				t.Fatalf("scheme = %q, want %q", parsed.Scheme, tc.wantScheme)
+			}
+			if parsed.Host != tc.wantHost {
+				t.Fatalf("host = %q, want %q", parsed.Host, tc.wantHost)
 			}
 			if parsed.Path != tc.wantPath {
 				t.Fatalf("path = %q, want %q", parsed.Path, tc.wantPath)

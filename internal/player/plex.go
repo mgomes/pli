@@ -131,7 +131,14 @@ func (c *PlexClient) StreamURL(partKey string) string {
 		return ""
 	}
 
-	streamURL := baseURL.ResolveReference(partURL)
+	// Plex can return an absolute part URL (sometimes localhost). Always anchor
+	// playback URLs to the configured server origin and keep only path/query.
+	streamURL := baseURL.ResolveReference(&url.URL{
+		Path:     partURL.Path,
+		RawPath:  partURL.RawPath,
+		RawQuery: partURL.RawQuery,
+		Fragment: partURL.Fragment,
+	})
 	if c.Token != "" {
 		query := streamURL.Query()
 		if query.Get("X-Plex-Token") == "" {

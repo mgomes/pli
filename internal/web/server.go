@@ -178,6 +178,7 @@ func (s *Server) router() http.Handler {
 		r.Post("/play", s.handlePlay)
 		r.Post("/timeline", s.handleTimeline)
 		r.Post("/watched", s.handleWatched)
+		r.Delete("/media/{ratingKey}", s.handleDeleteMedia)
 		r.Get("/sessions", s.handleSessions)
 	})
 
@@ -755,6 +756,27 @@ func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
+	ratingKey := strings.TrimSpace(chi.URLParam(r, "ratingKey"))
+	if ratingKey == "" {
+		writeError(w, http.StatusBadRequest, "rating key is required")
+		return
+	}
+
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	if err := plexClient.DeleteMetadata(r.Context(), ratingKey); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}

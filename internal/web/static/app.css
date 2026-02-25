@@ -1018,6 +1018,13 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.tv-show-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .section-label {
   font-family: "Google Sans", system-ui, sans-serif;
   font-size: 0.7rem;
@@ -1364,6 +1371,18 @@ body {
 
 .overflow-menu-item:hover {
   background: hsl(var(--muted));
+}
+
+.overflow-menu-item.danger {
+  color: hsl(var(--destructive));
+}
+
+.overflow-menu-item.danger svg {
+  color: hsl(var(--destructive));
+}
+
+.overflow-menu-item.danger:hover {
+  background: hsl(var(--destructive) / 0.14);
 }
 
 /* ---- Movie Detail Topbar ---- */

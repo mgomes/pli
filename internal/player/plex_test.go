@@ -66,6 +66,45 @@ func TestScrobbleChecksStatusCode(t *testing.T) {
 	})
 }
 
+func TestDeleteMetadataChecksStatusCode(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete {
+				t.Fatalf("unexpected method: %s", r.Method)
+			}
+			if r.URL.Path != "/library/metadata/123" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer ts.Close()
+
+		client := &PlexClient{BaseURL: ts.URL, Token: "token"}
+		if err := client.DeleteMetadata(context.Background(), "123"); err != nil {
+			t.Fatalf("DeleteMetadata() error = %v", err)
+		}
+	})
+
+	t.Run("error status", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "delete failed", http.StatusForbidden)
+		}))
+		defer ts.Close()
+
+		client := &PlexClient{BaseURL: ts.URL, Token: "token"}
+		if err := client.DeleteMetadata(context.Background(), "123"); err == nil {
+			t.Fatalf("expected DeleteMetadata() to fail on non-2xx status")
+		}
+	})
+
+	t.Run("missing rating key", func(t *testing.T) {
+		client := &PlexClient{BaseURL: "http://127.0.0.1:32400", Token: "token"}
+		if err := client.DeleteMetadata(context.Background(), " "); err == nil {
+			t.Fatalf("expected DeleteMetadata() to fail when rating key is empty")
+		}
+	})
+}
+
 func TestStreamURLBuildsValidURL(t *testing.T) {
 	tests := []struct {
 		name        string

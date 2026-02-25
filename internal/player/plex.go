@@ -221,6 +221,22 @@ func (c *PlexClient) Unscrobble(ctx context.Context, ratingKey string) error {
 	return c.doExpect2xx(req, "plex unscrobble")
 }
 
+func (c *PlexClient) DeleteMetadata(ctx context.Context, ratingKey string) error {
+	ratingKey = strings.TrimSpace(ratingKey)
+	if ratingKey == "" {
+		return fmt.Errorf("plex delete metadata: rating key is required")
+	}
+
+	u := fmt.Sprintf("%s/library/metadata/%s", strings.TrimRight(c.BaseURL, "/"), url.PathEscape(ratingKey))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+
+	return c.doExpect2xx(req, "plex delete metadata")
+}
+
 func (c *PlexClient) doExpect2xx(req *http.Request, op string) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

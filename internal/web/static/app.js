@@ -1095,6 +1095,10 @@ function renderMovieDetail(movie) {
               <i data-lucide="${isWatchedOrProgress ? "eye-off" : "eye"}"></i>
               ${isWatchedOrProgress ? "Mark Unwatched" : "Mark Watched"}
             </button>
+            <button class="overflow-menu-item danger" data-delete-media data-media-type="movie" data-rating-key="${escapeHtml(movie.id)}" data-media-title="${escapeHtml(movie.title)}">
+              <i data-lucide="trash-2"></i>
+              Delete Movie
+            </button>
           </div>
         </div>
       </div>
@@ -1139,7 +1143,18 @@ function renderMovieDetail(movie) {
   });
 
   wirePlayButtons(content);
-  wireOverflowMenus(content, () => openMovieDetail(movie.id, { historyMode: "replace" }));
+  wireOverflowMenus(content, {
+    onUpdate: () => openMovieDetail(movie.id, { historyMode: "replace" }),
+    onDelete: async () => {
+      state.selectedMovieId = null;
+      await loadMovies();
+      document.querySelector(".topbar").style.display = "";
+      setHeader(sectionMeta.movies.title, sectionMeta.movies.description);
+      renderMovies();
+      setRoute({ section: "movies" }, "replace");
+      drawIcons();
+    },
+  });
 }
 
 function renderTV() {
@@ -1187,7 +1202,20 @@ function renderTV() {
       <section class="tv-right"${state.selectedShowArtUrl ? ` style="--bg-art: url(${escapeHtml(state.selectedShowArtUrl)})"` : ""}>
         <div class="tv-right-backdrop"></div>
         <div>
-          <div class="section-label">${escapeHtml(state.selectedShowTitle || "Seasons")}</div>
+          <div class="tv-show-header">
+            <div class="section-label">${escapeHtml(state.selectedShowTitle || "Seasons")}</div>
+            <div class="overflow-menu">
+              <button class="overflow-menu-trigger" aria-label="More options">
+                <i data-lucide="ellipsis-vertical"></i>
+              </button>
+              <div class="overflow-menu-dropdown">
+                <button class="overflow-menu-item danger" data-delete-media data-media-type="show" data-rating-key="${escapeHtml(state.selectedShowId)}" data-media-title="${escapeHtml(state.selectedShowTitle || "")}">
+                  <i data-lucide="trash-2"></i>
+                  Delete Show
+                </button>
+              </div>
+            </div>
+          </div>
           ${state.selectedShowSummary ? `<p class="tv-show-summary">${escapeHtml(state.selectedShowSummary)}</p>` : ""}
           <div class="season-tabs">
             ${state.seasons
@@ -1297,10 +1325,28 @@ function renderTV() {
 
   wirePlayButtons(content);
   wireEpisodePlayButtons(content);
-  wireOverflowMenus(content, async () => {
-    await selectSeason(state.selectedSeasonId);
-    renderTV();
-    drawIcons();
+  wireOverflowMenus(content, {
+    onUpdate: async () => {
+      await selectSeason(state.selectedSeasonId);
+      renderTV();
+      drawIcons();
+    },
+    onDelete: async ({ mediaType }) => {
+      if (mediaType !== "show") {
+        return;
+      }
+      state.seasonEpisodeCache = {};
+      await loadTVShows();
+      renderTV();
+      drawIcons();
+      if (state.selectedShowId && state.selectedSeasonId) {
+        setRoute({ section: "tv", showId: state.selectedShowId, seasonId: state.selectedSeasonId }, "replace");
+      } else if (state.selectedShowId) {
+        setRoute({ section: "tv", showId: state.selectedShowId }, "replace");
+      } else {
+        setRoute({ section: "tv" }, "replace");
+      }
+    },
   });
 
   content.querySelectorAll("[data-episode-toggle]").forEach((row) => {
@@ -1566,6 +1612,18 @@ async function putJSON(path, body) {
   return response.json();
 }
 
+async function deleteJSON(path) {
+  const response = await fetch(path, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = await safeJSON(response);
+    throw new Error(payload?.error || `Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 async function playItem(type, id) {
   try {
     const result = await postJSON("/api/play", { type, id: String(id) });
@@ -1726,7 +1784,10 @@ function wireEpisodePlayButtons(container) {
   });
 }
 
-function wireOverflowMenus(container, onUpdate) {
+function wireOverflowMenus(container, handlers = {}) {
+  const onUpdate = typeof handlers === "function" ? handlers : handlers.onUpdate;
+  const onDelete = typeof handlers === "function" ? null : handlers.onDelete;
+
   container.querySelectorAll(".overflow-menu").forEach((menu) => {
     const trigger = menu.querySelector(".overflow-menu-trigger");
     const dropdown = menu.querySelector(".overflow-menu-dropdown");
@@ -1752,6 +1813,39 @@ function wireOverflowMenus(container, onUpdate) {
           if (onUpdate) await onUpdate();
         } catch (err) {
           console.error("toggle watched failed:", err.message);
+        }
+      });
+    });
+
+    menu.querySelectorAll("[data-delete-media]").forEach((item) => {
+      item.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const ratingKey = item.getAttribute("data-rating-key");
+        const mediaType = item.getAttribute("data-media-type") || "item";
+        const mediaTitle = item.getAttribute("data-media-title");
+        dropdown.classList.remove("open");
+        if (!ratingKey) {
+          return;
+        }
+
+        const label = mediaType === "movie" ? "movie" : mediaType === "show" ? "TV show" : "item";
+        const titleLabel = mediaTitle ? ` "${mediaTitle}"` : "";
+        const confirmed = window.confirm(
+          `Delete this ${label}${titleLabel} from your Plex library?\n\nThis cannot be undone.`,
+        );
+        if (!confirmed) {
+          return;
+        }
+
+        try {
+          await deleteJSON(`/api/media/${encodeURIComponent(ratingKey)}`);
+          if (onDelete) {
+            await onDelete({ mediaType, ratingKey });
+          } else if (onUpdate) {
+            await onUpdate();
+          }
+        } catch (err) {
+          console.error("delete media failed:", err.message);
         }
       });
     });

@@ -7,11 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,9 +35,10 @@ const (
 var uiFS embed.FS
 
 type Server struct {
-	queries  *db.Queries
-	template *template.Template
-	staticFS http.Handler
+	queries       *db.Queries
+	template      *template.Template
+	staticFS      http.Handler
+	imageCacheDir string
 }
 
 type indexData struct {
@@ -120,7 +125,7 @@ type tvEpisodeItem struct {
 	AddedAt       string `json:"added_at"`
 }
 
-func NewServer(queries *db.Queries) (*Server, error) {
+func NewServer(queries *db.Queries, imageCacheDir string) (*Server, error) {
 	tmpl, err := template.ParseFS(uiFS, "templates/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
@@ -132,9 +137,10 @@ func NewServer(queries *db.Queries) (*Server, error) {
 	}
 
 	return &Server{
-		queries:  queries,
-		template: tmpl,
-		staticFS: http.FileServer(http.FS(staticSub)),
+		queries:       queries,
+		template:      tmpl,
+		staticFS:      http.FileServer(http.FS(staticSub)),
+		imageCacheDir: imageCacheDir,
 	}, nil
 }
 
@@ -608,6 +614,11 @@ func (s *Server) handleTVEpisodes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) imageCachePath(coverPath string) string {
+	hash := sha256.Sum256([]byte(coverPath))
+	return filepath.Join(s.imageCacheDir, hex.EncodeToString(hash[:]))
+}
+
 func (s *Server) handlePlexImage(w http.ResponseWriter, r *http.Request) {
 	coverPath := strings.TrimSpace(r.URL.Query().Get("path"))
 	if coverPath == "" {
@@ -616,6 +627,15 @@ func (s *Server) handlePlexImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if !strings.HasPrefix(coverPath, "/") || strings.Contains(coverPath, "://") {
 		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	cachePath := s.imageCachePath(coverPath)
+	if data, err := os.ReadFile(cachePath); err == nil {
+		contentType := http.DetectContentType(data)
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "private, max-age=2592000")
+		w.Write(data)
 		return
 	}
 
@@ -648,12 +668,20 @@ func (s *Server) handlePlexImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to read image from plex")
+		return
+	}
+
+	_ = os.WriteFile(cachePath, body, 0o644)
+
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
-	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("Cache-Control", "private, max-age=2592000")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	w.Write(body)
 }
 
 func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {

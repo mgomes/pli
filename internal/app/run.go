@@ -82,7 +82,12 @@ func Run(ctx context.Context, addr, dbPath string) error {
 	}
 	defer database.Close()
 
-	server, err := web.NewServer(queries)
+	imageCacheDir := filepath.Join(filepath.Dir(dbPath), "cache", "images")
+	if err := os.MkdirAll(imageCacheDir, 0o755); err != nil {
+		return fmt.Errorf("create image cache directory: %w", err)
+	}
+
+	server, err := web.NewServer(queries, imageCacheDir)
 	if err != nil {
 		return err
 	}

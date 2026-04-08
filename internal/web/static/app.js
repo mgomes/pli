@@ -24,8 +24,6 @@ const state = {
   highlightedEpisodeId: null,
   searchQuery: "",
   continueWatching: [],
-  tvAutoplayEnabled: readStoredFlag("pli.tv.autoplay", true),
-  autoplayMonitor: null,
 };
 
 const sectionMeta = {
@@ -1235,10 +1233,6 @@ function renderTV() {
           <div class="section-label">
             Episodes${currentSeason ? ` · Season ${currentSeason.season_number}` : ""}
           </div>
-          <label class="switch-control">
-            <input type="checkbox" id="tv-autoplay-toggle"${state.tvAutoplayEnabled ? " checked" : ""} />
-            <span>Autoplay Up Next</span>
-          </label>
           <div class="episode-list">
             ${state.episodes
               .map(
@@ -1256,8 +1250,6 @@ function renderTV() {
                     <button
                       class="play-btn"
                       data-episode-play-id="${escapeHtml(episode.id)}"
-                      data-episode-play-show-id="${escapeHtml(state.selectedShowId)}"
-                      data-episode-play-season-id="${escapeHtml(state.selectedSeasonId)}"
                       title="Play"
                     >
                       <i data-lucide="play"></i>
@@ -1315,13 +1307,6 @@ function renderTV() {
       }
     });
   });
-
-  const autoplayToggle = content.querySelector("#tv-autoplay-toggle");
-  if (autoplayToggle) {
-    autoplayToggle.addEventListener("change", () => {
-      setTVAutoplayEnabled(autoplayToggle.checked);
-    });
-  }
 
   wirePlayButtons(content);
   wireEpisodePlayButtons(content);
@@ -1562,28 +1547,6 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function readStoredFlag(key, fallback = false) {
-  try {
-    const value = localStorage.getItem(key);
-    if (value === null) return fallback;
-    return value === "1";
-  } catch {
-    return fallback;
-  }
-}
-
-function setTVAutoplayEnabled(enabled) {
-  state.tvAutoplayEnabled = Boolean(enabled);
-  try {
-    localStorage.setItem("pli.tv.autoplay", state.tvAutoplayEnabled ? "1" : "0");
-  } catch {
-    // Ignore localStorage errors (private mode, permissions).
-  }
-  if (!state.tvAutoplayEnabled) {
-    stopAutoplayMonitor();
-  }
-}
-
 // ---- Playback ----
 
 async function postJSON(path, body) {
@@ -1647,138 +1610,13 @@ async function playItem(type, id) {
   }
 }
 
-function stopAutoplayMonitor() {
-  if (!state.autoplayMonitor) return;
-  if (state.autoplayMonitor.startTimerId) clearTimeout(state.autoplayMonitor.startTimerId);
-  if (state.autoplayMonitor.pollTimerId) clearInterval(state.autoplayMonitor.pollTimerId);
-  state.autoplayMonitor = null;
-}
-
-async function playEpisodeWithAutoplay(episodeId, showId, seasonId) {
-  const result = await playItem("episode", episodeId);
-  if (!result || !state.tvAutoplayEnabled) {
-    stopAutoplayMonitor();
-    return;
-  }
-
-  const nextEpisode = await resolveNextEpisode(showId, seasonId, episodeId);
-  if (!nextEpisode) {
-    stopAutoplayMonitor();
-    return;
-  }
-
-  const durationMs = Number(result.duration_ms || 0);
-  const startOffsetMs = Number(result.view_offset_ms || 0);
-  const remainingMs = Math.max(0, durationMs - startOffsetMs);
-  const startedAt = Date.now();
-  const expectedEndMs = startedAt + (remainingMs || 30 * 60 * 1000);
-
-  stopAutoplayMonitor();
-  const monitor = {
-    currentEpisodeId: String(episodeId),
-    nextEpisodeId: String(nextEpisode.id),
-    nextShowId: String(nextEpisode.showId),
-    nextSeasonId: String(nextEpisode.seasonId),
-    expectedEndMs,
-    seenCurrentSession: false,
-    polling: false,
-    startTimerId: null,
-    pollTimerId: null,
-  };
-
-  const startPollingDelay = Math.max(8000, Math.min(60000, Math.round((remainingMs || 0) * 0.6)));
-  monitor.startTimerId = setTimeout(() => {
-    void pollAutoplayMonitor(monitor);
-    monitor.pollTimerId = setInterval(() => {
-      void pollAutoplayMonitor(monitor);
-    }, 6000);
-  }, startPollingDelay);
-
-  state.autoplayMonitor = monitor;
-}
-
-async function pollAutoplayMonitor(monitor) {
-  if (!state.autoplayMonitor || state.autoplayMonitor !== monitor || monitor.polling) {
-    return;
-  }
-
-  monitor.polling = true;
-  try {
-    const payload = await fetchJSON("/api/sessions");
-    const sessions = payload.sessions ?? [];
-    const hasCurrent = sessions.some((session) => String(session.rating_key) === monitor.currentEpisodeId);
-    if (hasCurrent) {
-      monitor.seenCurrentSession = true;
-      return;
-    }
-
-    const now = Date.now();
-    const hasReachedEnd = now >= monitor.expectedEndMs - 5000;
-    const graceElapsed = now >= monitor.expectedEndMs + 30000;
-    if (!hasReachedEnd && !graceElapsed) return;
-    if (!monitor.seenCurrentSession && !graceElapsed) return;
-
-    stopAutoplayMonitor();
-    if (!state.tvAutoplayEnabled) return;
-    await playEpisodeWithAutoplay(monitor.nextEpisodeId, monitor.nextShowId, monitor.nextSeasonId);
-  } catch (err) {
-    console.error("autoplay monitor failed:", err.message);
-  } finally {
-    monitor.polling = false;
-  }
-}
-
-async function resolveNextEpisode(showId, seasonId, episodeId) {
-  let seasonEpisodes = await fetchSeasonEpisodes(showId, seasonId);
-  let idx = seasonEpisodes.findIndex((episode) => String(episode.id) === String(episodeId));
-  if (idx >= 0 && idx < seasonEpisodes.length - 1) {
-    return {
-      id: seasonEpisodes[idx + 1].id,
-      showId,
-      seasonId,
-    };
-  }
-
-  let seasons;
-  if (state.selectedShowId === showId && state.seasons.length) {
-    seasons = state.seasons;
-  } else {
-    try {
-      const response = await fetchJSON(`/api/tv/shows/${encodeURIComponent(showId)}/seasons`);
-      seasons = response.seasons ?? [];
-    } catch {
-      return null;
-    }
-  }
-
-  const orderedSeasons = [...seasons].sort((a, b) => a.season_number - b.season_number);
-  const seasonIndex = orderedSeasons.findIndex((season) => String(season.id) === String(seasonId));
-  if (seasonIndex === -1) {
-    return null;
-  }
-
-  for (let i = seasonIndex + 1; i < orderedSeasons.length; i += 1) {
-    seasonEpisodes = await fetchSeasonEpisodes(showId, orderedSeasons[i].id);
-    if (seasonEpisodes.length) {
-      return {
-        id: seasonEpisodes[0].id,
-        showId,
-        seasonId: orderedSeasons[i].id,
-      };
-    }
-  }
-  return null;
-}
-
 function wireEpisodePlayButtons(container) {
   container.querySelectorAll("[data-episode-play-id]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const episodeId = btn.getAttribute("data-episode-play-id");
-      const showId = btn.getAttribute("data-episode-play-show-id");
-      const seasonId = btn.getAttribute("data-episode-play-season-id");
-      if (episodeId && showId && seasonId) {
-        void playEpisodeWithAutoplay(episodeId, showId, seasonId);
+      if (episodeId) {
+        void playItem("episode", episodeId);
       }
     });
   });

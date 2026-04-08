@@ -197,3 +197,121 @@ func TestStreamURLBuildsValidURL(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchMetadataIncludesMarkersAndEpisodeContext(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/123" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`
+<MediaContainer size="1">
+  <Video ratingKey="123" type="episode" grandparentRatingKey="show-1" parentRatingKey="season-1" parentIndex="1" index="2" title="Second Episode" duration="1800000" viewOffset="60000">
+    <Media>
+      <Part key="/library/parts/123/file.mkv" />
+    </Media>
+    <Marker type="credits" startTimeOffset="1700000" endTimeOffset="1795000" final="1" />
+    <Marker type="intro" startTimeOffset="15000" endTimeOffset="75000" />
+  </Video>
+</MediaContainer>`))
+	}))
+	defer ts.Close()
+
+	client := &PlexClient{BaseURL: ts.URL, Token: "token"}
+	meta, err := client.FetchMetadata(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("FetchMetadata() error = %v", err)
+	}
+
+	if meta.RatingKey != "123" {
+		t.Fatalf("RatingKey = %q, want %q", meta.RatingKey, "123")
+	}
+	if meta.Type != "episode" {
+		t.Fatalf("Type = %q, want %q", meta.Type, "episode")
+	}
+	if meta.ShowID != "show-1" {
+		t.Fatalf("ShowID = %q, want %q", meta.ShowID, "show-1")
+	}
+	if meta.SeasonID != "season-1" {
+		t.Fatalf("SeasonID = %q, want %q", meta.SeasonID, "season-1")
+	}
+	if meta.SeasonNumber != 1 || meta.EpisodeNumber != 2 {
+		t.Fatalf("episode coordinates = S%02dE%02d, want S01E02", meta.SeasonNumber, meta.EpisodeNumber)
+	}
+	if len(meta.Markers) != 2 {
+		t.Fatalf("markers length = %d, want 2", len(meta.Markers))
+	}
+	if meta.Markers[0].Type != "intro" {
+		t.Fatalf("first marker type = %q, want %q", meta.Markers[0].Type, "intro")
+	}
+	if !meta.Markers[1].Final {
+		t.Fatalf("credits marker final = false, want true")
+	}
+}
+
+func TestFetchNextEpisodeResolvesChronologicalSuccessor(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+
+		switch r.URL.Path {
+		case "/library/metadata/current":
+			_, _ = w.Write([]byte(`
+<MediaContainer size="1">
+  <Video ratingKey="current" type="episode" grandparentRatingKey="show-1" parentRatingKey="season-1" parentIndex="1" index="2" title="Episode 2" duration="1800000">
+    <Media>
+      <Part key="/library/parts/current/file.mkv" />
+    </Media>
+  </Video>
+</MediaContainer>`))
+		case "/library/metadata/show-1/allLeaves":
+			_, _ = w.Write([]byte(`
+<MediaContainer size="3">
+  <Video ratingKey="ep-4" grandparentRatingKey="show-1" parentIndex="2" index="1" title="Episode 4" />
+  <Video ratingKey="current" grandparentRatingKey="show-1" parentIndex="1" index="2" title="Episode 2" />
+  <Video ratingKey="ep-3" grandparentRatingKey="show-1" parentIndex="1" index="3" title="Episode 3" />
+</MediaContainer>`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	client := &PlexClient{BaseURL: ts.URL, Token: "token"}
+	nextEpisode, err := client.FetchNextEpisode(context.Background(), "current")
+	if err != nil {
+		t.Fatalf("FetchNextEpisode() error = %v", err)
+	}
+	if nextEpisode == nil {
+		t.Fatalf("FetchNextEpisode() = nil, want next episode")
+	}
+	if nextEpisode.ID != "ep-3" {
+		t.Fatalf("next episode ID = %q, want %q", nextEpisode.ID, "ep-3")
+	}
+}
+
+func TestFetchNextEpisodeReturnsNilForNonEpisode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/movie-1" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`
+<MediaContainer size="1">
+  <Video ratingKey="movie-1" type="movie" title="A Movie" duration="7200000">
+    <Media>
+      <Part key="/library/parts/movie-1/file.mkv" />
+    </Media>
+  </Video>
+</MediaContainer>`))
+	}))
+	defer ts.Close()
+
+	client := &PlexClient{BaseURL: ts.URL, Token: "token"}
+	nextEpisode, err := client.FetchNextEpisode(context.Background(), "movie-1")
+	if err != nil {
+		t.Fatalf("FetchNextEpisode() error = %v", err)
+	}
+	if nextEpisode != nil {
+		t.Fatalf("FetchNextEpisode() = %#v, want nil", nextEpisode)
+	}
+}

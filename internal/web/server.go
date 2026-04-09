@@ -127,6 +127,7 @@ type tvEpisodeItem struct {
 
 type playResponse struct {
 	Title        string `json:"title,omitempty"`
+	DisplayTitle string `json:"display_title,omitempty"`
 	StreamURL    string `json:"stream_url"`
 	RatingKey    string `json:"rating_key"`
 	DurationMs   int64  `json:"duration_ms"`
@@ -774,6 +775,7 @@ func (s *Server) handlePlayerContext(w http.ResponseWriter, r *http.Request) {
 		"rating_key":     meta.RatingKey,
 		"item_type":      meta.Type,
 		"title":          meta.Title,
+		"display_title":  mediaDisplayTitle(meta),
 		"duration_ms":    meta.Duration,
 		"view_offset_ms": meta.ViewOffset,
 		"markers":        markers,
@@ -821,11 +823,35 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 func buildPlayResponse(plexClient *player.PlexClient, meta *player.PlexMetadata) playResponse {
 	return playResponse{
 		Title:        meta.Title,
+		DisplayTitle: mediaDisplayTitle(meta),
 		StreamURL:    plexClient.StreamURL(meta.PartKey),
 		RatingKey:    meta.RatingKey,
 		DurationMs:   meta.Duration,
 		ViewOffsetMs: meta.ViewOffset,
 	}
+}
+
+func mediaDisplayTitle(meta *player.PlexMetadata) string {
+	if meta == nil {
+		return ""
+	}
+
+	title := strings.TrimSpace(meta.Title)
+	if meta.Type != "episode" {
+		return title
+	}
+
+	showTitle := strings.TrimSpace(meta.ShowTitle)
+	if showTitle == "" {
+		return title
+	}
+	if meta.SeasonNumber > 0 && meta.EpisodeNumber > 0 && title != "" {
+		return fmt.Sprintf("%s · S%02dE%02d · %s", showTitle, meta.SeasonNumber, meta.EpisodeNumber, title)
+	}
+	if title != "" {
+		return showTitle + " · " + title
+	}
+	return showTitle
 }
 
 func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {

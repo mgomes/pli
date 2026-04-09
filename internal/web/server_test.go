@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mgomes/pli/internal/db"
+	"github.com/mgomes/pli/internal/player"
 	_ "modernc.org/sqlite"
 )
 
@@ -22,7 +23,7 @@ func TestHandlePlayerContextReturnsCurrentContextWhenNextMetadataFails(t *testin
 		case "/library/metadata/current":
 			_, _ = w.Write([]byte(`
 <MediaContainer size="1">
-  <Video ratingKey="current" type="episode" grandparentRatingKey="show-1" parentRatingKey="season-1" parentIndex="1" index="2" title="Episode 2" duration="1800000" viewOffset="60000">
+  <Video ratingKey="current" type="episode" grandparentRatingKey="show-1" grandparentTitle="Show 1" parentRatingKey="season-1" parentIndex="1" index="2" title="Episode 2" duration="1800000" viewOffset="60000">
     <Media>
       <Part key="/library/parts/current/file.mkv" />
     </Media>
@@ -88,8 +89,9 @@ CREATE TABLE app_config (
 	}
 
 	var payload struct {
-		RatingKey string `json:"rating_key"`
-		Markers   []struct {
+		RatingKey    string `json:"rating_key"`
+		DisplayTitle string `json:"display_title"`
+		Markers      []struct {
 			Type string `json:"type"`
 		} `json:"markers"`
 		Next *struct {
@@ -102,6 +104,9 @@ CREATE TABLE app_config (
 
 	if payload.RatingKey != "current" {
 		t.Fatalf("rating_key = %q, want %q", payload.RatingKey, "current")
+	}
+	if payload.DisplayTitle != "Show 1 · S01E02 · Episode 2" {
+		t.Fatalf("display_title = %q, want %q", payload.DisplayTitle, "Show 1 · S01E02 · Episode 2")
 	}
 	if len(payload.Markers) != 1 || payload.Markers[0].Type != "intro" {
 		t.Fatalf("markers = %#v, want one intro marker", payload.Markers)
@@ -121,7 +126,7 @@ func TestHandlePlayerContextReturnsCurrentContextWhenNextEpisodeLookupFails(t *t
 		case "/library/metadata/current":
 			_, _ = w.Write([]byte(`
 <MediaContainer size="1">
-  <Video ratingKey="current" type="episode" grandparentRatingKey="show-1" parentRatingKey="season-1" parentIndex="1" index="2" title="Episode 2" duration="1800000" viewOffset="60000">
+  <Video ratingKey="current" type="episode" grandparentRatingKey="show-1" grandparentTitle="Show 1" parentRatingKey="season-1" parentIndex="1" index="2" title="Episode 2" duration="1800000" viewOffset="60000">
     <Media>
       <Part key="/library/parts/current/file.mkv" />
     </Media>
@@ -181,8 +186,9 @@ CREATE TABLE app_config (
 	}
 
 	var payload struct {
-		RatingKey string `json:"rating_key"`
-		Markers   []struct {
+		RatingKey    string `json:"rating_key"`
+		DisplayTitle string `json:"display_title"`
+		Markers      []struct {
 			Type string `json:"type"`
 		} `json:"markers"`
 		Next *struct {
@@ -196,10 +202,62 @@ CREATE TABLE app_config (
 	if payload.RatingKey != "current" {
 		t.Fatalf("rating_key = %q, want %q", payload.RatingKey, "current")
 	}
+	if payload.DisplayTitle != "Show 1 · S01E02 · Episode 2" {
+		t.Fatalf("display_title = %q, want %q", payload.DisplayTitle, "Show 1 · S01E02 · Episode 2")
+	}
 	if len(payload.Markers) != 1 || payload.Markers[0].Type != "intro" {
 		t.Fatalf("markers = %#v, want one intro marker", payload.Markers)
 	}
 	if payload.Next != nil {
 		t.Fatalf("next = %#v, want nil", payload.Next)
+	}
+}
+
+func TestMediaDisplayTitle(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		meta *player.PlexMetadata
+		want string
+	}{
+		{
+			name: "episode with show and numbers",
+			meta: &player.PlexMetadata{
+				Type:          "episode",
+				ShowTitle:     "The Office (US)",
+				SeasonNumber:  2,
+				EpisodeNumber: 8,
+				Title:         "Performance Review",
+			},
+			want: "The Office (US) · S02E08 · Performance Review",
+		},
+		{
+			name: "episode without numbers",
+			meta: &player.PlexMetadata{
+				Type:      "episode",
+				ShowTitle: "The Office (US)",
+				Title:     "Performance Review",
+			},
+			want: "The Office (US) · Performance Review",
+		},
+		{
+			name: "movie",
+			meta: &player.PlexMetadata{
+				Type:  "movie",
+				Title: "Heat",
+			},
+			want: "Heat",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := mediaDisplayTitle(tt.meta); got != tt.want {
+				t.Fatalf("mediaDisplayTitle() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

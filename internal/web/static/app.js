@@ -1591,6 +1591,9 @@ async function playItem(type, id) {
     const result = await postJSON("/api/play", { type, id: String(id) });
     if (result.stream_url) {
       const streamUrl = new URL(result.stream_url);
+      if (result.display_title) {
+        streamUrl.searchParams.set("X-Pli-Display-Title", result.display_title);
+      }
       if (result.rating_key) {
         streamUrl.searchParams.set("X-Pli-Rating-Key", result.rating_key);
       }

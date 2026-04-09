@@ -28,6 +28,7 @@ type plexMediaContainer struct {
 
 type plexVideo struct {
 	Title                string       `xml:"title,attr"`
+	GrandparentTitle     string       `xml:"grandparentTitle,attr"`
 	Type                 string       `xml:"type,attr"`
 	RatingKey            string       `xml:"ratingKey,attr"`
 	ParentRatingKey      string       `xml:"parentRatingKey,attr"`
@@ -67,6 +68,7 @@ type PlexMetadata struct {
 	RatingKey     string
 	Type          string
 	ShowID        string
+	ShowTitle     string
 	SeasonID      string
 	SeasonNumber  int64
 	EpisodeNumber int64
@@ -144,6 +146,7 @@ func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*Plex
 		RatingKey:     strings.TrimSpace(mc.Videos[0].RatingKey),
 		Type:          strings.TrimSpace(mc.Videos[0].Type),
 		ShowID:        strings.TrimSpace(mc.Videos[0].GrandparentRatingKey),
+		ShowTitle:     strings.TrimSpace(mc.Videos[0].GrandparentTitle),
 		SeasonID:      strings.TrimSpace(mc.Videos[0].ParentRatingKey),
 		SeasonNumber:  mc.Videos[0].ParentIndex,
 		EpisodeNumber: mc.Videos[0].Index,

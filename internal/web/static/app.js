@@ -149,7 +149,6 @@ async function navigateToRoute(route, options = {}) {
   document.querySelector(".topbar").style.display = "";
   state.section = section;
   state.searchQuery = "";
-  stopAutoplayMonitor();
   const searchInput = document.getElementById("search-input");
   if (searchInput) searchInput.value = "";
   setActiveButton(section);

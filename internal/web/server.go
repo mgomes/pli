@@ -2,10 +2,8 @@ package web
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"

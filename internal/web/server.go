@@ -759,10 +759,8 @@ func (s *Server) handlePlayerContext(w http.ResponseWriter, r *http.Request) {
 	var next *playResponse
 	nextEpisode, err := plexClient.FetchNextEpisode(r.Context(), ratingKey)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	if nextEpisode != nil {
+		log.Printf("next episode lookup error for %s: %v", ratingKey, err)
+	} else if nextEpisode != nil {
 		nextMeta, err := plexClient.FetchMetadata(r.Context(), nextEpisode.ID)
 		if err != nil {
 			log.Printf("next episode metadata error for %s: %v", nextEpisode.ID, err)

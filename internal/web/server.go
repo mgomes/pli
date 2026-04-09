@@ -765,11 +765,11 @@ func (s *Server) handlePlayerContext(w http.ResponseWriter, r *http.Request) {
 	if nextEpisode != nil {
 		nextMeta, err := plexClient.FetchMetadata(r.Context(), nextEpisode.ID)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
+			log.Printf("next episode metadata error for %s: %v", nextEpisode.ID, err)
+		} else {
+			response := buildPlayResponse(plexClient, nextMeta)
+			next = &response
 		}
-		response := buildPlayResponse(plexClient, nextMeta)
-		next = &response
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

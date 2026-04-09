@@ -203,6 +203,9 @@ func TestFetchMetadataIncludesMarkersAndEpisodeContext(t *testing.T) {
 		if r.URL.Path != "/library/metadata/123" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		if got := r.URL.Query().Get("includeMarkers"); got != "1" {
+			t.Fatalf("includeMarkers = %q, want %q", got, "1")
+		}
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = w.Write([]byte(`
 <MediaContainer size="1">

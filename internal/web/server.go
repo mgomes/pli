@@ -2,13 +2,13 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"io/fs"
 	"log"
@@ -125,6 +125,21 @@ type tvEpisodeItem struct {
 	AddedAt       string `json:"added_at"`
 }
 
+type playResponse struct {
+	Title        string `json:"title,omitempty"`
+	StreamURL    string `json:"stream_url"`
+	RatingKey    string `json:"rating_key"`
+	DurationMs   int64  `json:"duration_ms"`
+	ViewOffsetMs int64  `json:"view_offset_ms"`
+}
+
+type playerMarkerItem struct {
+	Type    string `json:"type"`
+	StartMs int64  `json:"start_ms"`
+	EndMs   int64  `json:"end_ms"`
+	Final   bool   `json:"final,omitempty"`
+}
+
 func NewServer(queries *db.Queries, imageCacheDir string) (*Server, error) {
 	tmpl, err := template.ParseFS(uiFS, "templates/index.html")
 	if err != nil {
@@ -181,6 +196,7 @@ func (s *Server) router() http.Handler {
 		r.Post("/plex/test", s.handlePlexTest)
 		r.Post("/plex/auth/start", s.handlePlexAuthStart)
 		r.Get("/plex/auth/poll/{pinID}", s.handlePlexAuthPoll)
+		r.Get("/player/context", s.handlePlayerContext)
 		r.Post("/play", s.handlePlay)
 		r.Post("/timeline", s.handleTimeline)
 		r.Post("/watched", s.handleWatched)
@@ -708,12 +724,60 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streamURL := plexClient.StreamURL(meta.PartKey)
+	writeJSON(w, http.StatusOK, buildPlayResponse(plexClient, meta))
+}
+
+func (s *Server) handlePlayerContext(w http.ResponseWriter, r *http.Request) {
+	ratingKey := strings.TrimSpace(r.URL.Query().Get("rating_key"))
+	if ratingKey == "" {
+		writeError(w, http.StatusBadRequest, "rating_key is required")
+		return
+	}
+
+	plexClient, err := s.plexClient(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load plex configuration")
+		return
+	}
+
+	meta, err := plexClient.FetchMetadata(r.Context(), ratingKey)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	markers := make([]playerMarkerItem, 0, len(meta.Markers))
+	for _, marker := range meta.Markers {
+		markers = append(markers, playerMarkerItem{
+			Type:    marker.Type,
+			StartMs: marker.StartTimeOffset,
+			EndMs:   marker.EndTimeOffset,
+			Final:   marker.Final,
+		})
+	}
+
+	var next *playResponse
+	nextEpisode, err := plexClient.FetchNextEpisode(r.Context(), ratingKey)
+	if err != nil {
+		log.Printf("next episode lookup error for %s: %v", ratingKey, err)
+	} else if nextEpisode != nil {
+		nextMeta, err := plexClient.FetchMetadata(r.Context(), nextEpisode.ID)
+		if err != nil {
+			log.Printf("next episode metadata error for %s: %v", nextEpisode.ID, err)
+		} else {
+			response := buildPlayResponse(plexClient, nextMeta)
+			next = &response
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"stream_url":     streamURL,
-		"rating_key":     req.ID,
+		"rating_key":     meta.RatingKey,
+		"item_type":      meta.Type,
+		"title":          meta.Title,
 		"duration_ms":    meta.Duration,
 		"view_offset_ms": meta.ViewOffset,
+		"markers":        markers,
+		"next":           next,
 	})
 }
 
@@ -752,6 +816,16 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func buildPlayResponse(plexClient *player.PlexClient, meta *player.PlexMetadata) playResponse {
+	return playResponse{
+		Title:        meta.Title,
+		StreamURL:    plexClient.StreamURL(meta.PartKey),
+		RatingKey:    meta.RatingKey,
+		DurationMs:   meta.Duration,
+		ViewOffsetMs: meta.ViewOffset,
+	}
 }
 
 func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {

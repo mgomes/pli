@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,12 +27,18 @@ type plexMediaContainer struct {
 }
 
 type plexVideo struct {
-	Title      string      `xml:"title,attr"`
-	RatingKey  string      `xml:"ratingKey,attr"`
-	SessionKey string      `xml:"sessionKey,attr"`
-	Duration   int64       `xml:"duration,attr"`
-	ViewOffset int64       `xml:"viewOffset,attr"`
-	Media      []plexMedia `xml:"Media"`
+	Title                string       `xml:"title,attr"`
+	Type                 string       `xml:"type,attr"`
+	RatingKey            string       `xml:"ratingKey,attr"`
+	ParentRatingKey      string       `xml:"parentRatingKey,attr"`
+	GrandparentRatingKey string       `xml:"grandparentRatingKey,attr"`
+	SessionKey           string       `xml:"sessionKey,attr"`
+	Duration             int64        `xml:"duration,attr"`
+	ViewOffset           int64        `xml:"viewOffset,attr"`
+	ParentIndex          int64        `xml:"parentIndex,attr"`
+	Index                int64        `xml:"index,attr"`
+	Media                []plexMedia  `xml:"Media"`
+	Markers              []plexMarker `xml:"Marker"`
 }
 
 type plexMedia struct {
@@ -42,11 +49,32 @@ type plexPart struct {
 	Key string `xml:"key,attr"`
 }
 
+type plexMarker struct {
+	Type            string `xml:"type,attr"`
+	StartTimeOffset int64  `xml:"startTimeOffset,attr"`
+	EndTimeOffset   int64  `xml:"endTimeOffset,attr"`
+	Final           bool   `xml:"final,attr"`
+}
+
+type PlexMarker struct {
+	Type            string
+	StartTimeOffset int64
+	EndTimeOffset   int64
+	Final           bool
+}
+
 type PlexMetadata struct {
-	Title      string
-	PartKey    string
-	Duration   int64 // milliseconds
-	ViewOffset int64 // milliseconds
+	RatingKey     string
+	Type          string
+	ShowID        string
+	SeasonID      string
+	SeasonNumber  int64
+	EpisodeNumber int64
+	Title         string
+	PartKey       string
+	Duration      int64 // milliseconds
+	ViewOffset    int64 // milliseconds
+	Markers       []PlexMarker
 }
 
 func (c *PlexClient) TestConnection(ctx context.Context) (string, error) {
@@ -113,11 +141,56 @@ func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*Plex
 	}
 
 	return &PlexMetadata{
-		Title:      mc.Videos[0].Title,
-		PartKey:    mc.Videos[0].Media[0].Parts[0].Key,
-		Duration:   mc.Videos[0].Duration,
-		ViewOffset: mc.Videos[0].ViewOffset,
+		RatingKey:     strings.TrimSpace(mc.Videos[0].RatingKey),
+		Type:          strings.TrimSpace(mc.Videos[0].Type),
+		ShowID:        strings.TrimSpace(mc.Videos[0].GrandparentRatingKey),
+		SeasonID:      strings.TrimSpace(mc.Videos[0].ParentRatingKey),
+		SeasonNumber:  mc.Videos[0].ParentIndex,
+		EpisodeNumber: mc.Videos[0].Index,
+		Title:         mc.Videos[0].Title,
+		PartKey:       mc.Videos[0].Media[0].Parts[0].Key,
+		Duration:      mc.Videos[0].Duration,
+		ViewOffset:    mc.Videos[0].ViewOffset,
+		Markers:       normalizeMarkers(mc.Videos[0].Markers),
 	}, nil
+}
+
+func (c *PlexClient) FetchNextEpisode(ctx context.Context, ratingKey string) (*PlexEpisode, error) {
+	current, err := c.FetchMetadata(ctx, ratingKey)
+	if err != nil {
+		return nil, err
+	}
+	if current.Type != "episode" || current.ShowID == "" {
+		return nil, nil
+	}
+
+	var container browseContainer
+	if err := c.doXML(ctx, "/library/metadata/"+current.ShowID+"/allLeaves", &container); err != nil {
+		return nil, err
+	}
+
+	episodes := make([]PlexEpisode, 0, len(container.Videos))
+	for _, v := range container.Videos {
+		episodeID := strings.TrimSpace(v.RatingKey)
+		if episodeID == "" {
+			continue
+		}
+		episodes = append(episodes, PlexEpisode{
+			ID:            episodeID,
+			ShowID:        strings.TrimSpace(v.GrandparentRatingKey),
+			SeasonNumber:  v.ParentIndex,
+			EpisodeNumber: v.Index,
+			Title:         v.Title,
+			Summary:       strings.TrimSpace(v.Summary),
+			Watched:       false,
+			ViewOffset:    v.ViewOffset,
+			Duration:      v.Duration,
+			AddedAt:       toRFC3339(v.AddedAt),
+			CoverPath:     firstNonEmpty(v.Thumb, v.ParentThumb, v.GrandparentThumb),
+		})
+	}
+
+	return nextEpisodeAfter(current, episodes), nil
 }
 
 func (c *PlexClient) StreamURL(partKey string) string {
@@ -148,6 +221,63 @@ func (c *PlexClient) StreamURL(partKey string) string {
 	}
 
 	return streamURL.String()
+}
+
+func normalizeMarkers(markers []plexMarker) []PlexMarker {
+	result := make([]PlexMarker, 0, len(markers))
+	for _, marker := range markers {
+		markerType := strings.ToLower(strings.TrimSpace(marker.Type))
+		if markerType == "" || marker.EndTimeOffset <= marker.StartTimeOffset {
+			continue
+		}
+		result = append(result, PlexMarker{
+			Type:            markerType,
+			StartTimeOffset: marker.StartTimeOffset,
+			EndTimeOffset:   marker.EndTimeOffset,
+			Final:           marker.Final,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].StartTimeOffset == result[j].StartTimeOffset {
+			return result[i].EndTimeOffset < result[j].EndTimeOffset
+		}
+		return result[i].StartTimeOffset < result[j].StartTimeOffset
+	})
+
+	return result
+}
+
+func nextEpisodeAfter(current *PlexMetadata, episodes []PlexEpisode) *PlexEpisode {
+	if current == nil || len(episodes) == 0 {
+		return nil
+	}
+
+	sort.Slice(episodes, func(i, j int) bool {
+		if episodes[i].SeasonNumber == episodes[j].SeasonNumber {
+			if episodes[i].EpisodeNumber == episodes[j].EpisodeNumber {
+				return episodes[i].ID < episodes[j].ID
+			}
+			return episodes[i].EpisodeNumber < episodes[j].EpisodeNumber
+		}
+		return episodes[i].SeasonNumber < episodes[j].SeasonNumber
+	})
+
+	for i := range episodes {
+		episode := episodes[i]
+		if episode.ID == current.RatingKey {
+			continue
+		}
+		if episode.SeasonNumber < current.SeasonNumber {
+			continue
+		}
+		if episode.SeasonNumber == current.SeasonNumber && episode.EpisodeNumber <= current.EpisodeNumber {
+			continue
+		}
+		return &episodes[i]
+	}
+
+	return nil
 }
 
 func (c *PlexClient) ReportTimeline(ctx context.Context, ratingKey string, timeMs, durationMs int64, state string) error {

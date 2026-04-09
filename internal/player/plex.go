@@ -111,7 +111,7 @@ func (c *PlexClient) TestConnection(ctx context.Context) (string, error) {
 }
 
 func (c *PlexClient) FetchMetadata(ctx context.Context, ratingKey string) (*PlexMetadata, error) {
-	u := fmt.Sprintf("%s/library/metadata/%s", c.BaseURL, ratingKey)
+	u := fmt.Sprintf("%s/library/metadata/%s?includeMarkers=1", c.BaseURL, ratingKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err

@@ -294,10 +294,16 @@ impl Plex {
 
     /// Namespaces caches by server and credentials so switching servers cannot reuse another library.
     pub fn cache_key(&self, path: &str) -> String {
-        format!(
-            "{:x}",
-            Sha256::digest(format!("{}\0{}\0{path}", self.base, self.token))
-        )
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        Sha256::digest(format!("{}\0{}\0{path}", self.base, self.token))
+            .iter()
+            .flat_map(|byte| {
+                [
+                    HEX[(byte >> 4) as usize] as char,
+                    HEX[(byte & 15) as usize] as char,
+                ]
+            })
+            .collect()
     }
 
     fn endpoint(&self, path: &str) -> Result<Url> {
@@ -645,6 +651,27 @@ fn timestamp(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_keys_preserve_existing_names_and_connection_isolation() -> Result<()> {
+        let plex = Plex::new("http://localhost:32400", "fixture-token", "pli")?;
+        let path = "/library/metadata/42/thumb";
+        let key = plex.cache_key(path);
+        assert_eq!(
+            key,
+            "c3450541035ee4b2bfc6847c0e60dc46cead3d8ae0973ee38930aedf9f3c2206"
+        );
+        assert_ne!(key, plex.cache_key("/library/metadata/43/thumb"));
+        assert_ne!(
+            key,
+            Plex::new("http://darwin:32400", "fixture-token", "pli")?.cache_key(path)
+        );
+        assert_ne!(
+            key,
+            Plex::new("http://localhost:32400", "different-token", "pli")?.cache_key(path)
+        );
+        Ok(())
+    }
 
     #[test]
     fn stream_urls_use_configured_origin() -> Result<()> {

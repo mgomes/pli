@@ -3,21 +3,40 @@ set shell := ["bash", "-cu"]
 app_addr := env_var_or_default("PLI_ADDR", "0.0.0.0:8080")
 db_path := env_var_or_default("PLI_DB_PATH", "data/pli.db")
 bin_path := env_var_or_default("PLI_BIN_PATH", "bin/pli")
-# Boot the web server.
+
+# Run the web server.
 serve:
-	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod"
-	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" PLI_ADDR={{app_addr}} PLI_DB_PATH={{db_path}} go run ./cmd/pli
+    PLI_ADDR="{{app_addr}}" PLI_DB_PATH="{{db_path}}" cargo run --locked
 
-# Run all Go tests.
+# Run Rust tests, including legacy database compatibility.
 test:
-	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod"
-	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go test ./...
+    cargo test --locked
 
-# Build the pli binary.
+# Build the standalone binary with embedded web assets.
 build:
-	mkdir -p "$PWD/.cache/go-build" "$PWD/.cache/go-mod" "$(dirname "{{bin_path}}")"
-	GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go build -o "{{bin_path}}" ./cmd/pli
+    cargo build --release --locked
+    mkdir -p "$(dirname "{{bin_path}}")"
+    cp target/release/pli "{{bin_path}}"
 
-# Refresh sqlc-generated query code.
-sqlc:
-	./bin/sqlc generate
+# Format Rust source.
+fmt:
+    cargo fmt --all
+
+# Check Rust lints.
+lint:
+    cargo clippy --locked --all-targets -- -D warnings
+
+# Run source checks and Rust tests.
+check:
+    cargo fmt --all --check
+    cargo clippy --locked --all-targets -- -D warnings
+    cargo test --locked
+
+# Test the real app against a local Plex fixture in Chromium.
+test-ui:
+    npm test
+
+# Run an isolated sample library without changing saved settings.
+preview:
+    cargo build --locked
+    npm run preview

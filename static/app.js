@@ -1,4 +1,12 @@
+import { playerURL } from './player.js';
+
+let heroTimer;
+let notificationTimer;
+let navigationController;
+let authController;
+
 const state = {
+  heroIndex: 0,
   section: "recently-added",
   config: [],
   recent: [],
@@ -48,7 +56,7 @@ const sectionMeta = {
 window.addEventListener("DOMContentLoaded", async () => {
   wireSectionNav();
   wireSearch();
-  await loadConfig();
+  try { await loadConfig(); } catch (error) { notify(error.message); }
   window.addEventListener("popstate", () => {
     void navigateToRoute(parseRoute(window.location.pathname), { historyMode: "none" });
   });
@@ -143,11 +151,36 @@ function setRoute(route, historyMode = "push") {
 }
 
 async function navigateToRoute(route, options = {}) {
+  authController?.abort();
+  if (options.historyMode !== 'none') setRoute(route, options.historyMode);
+  navigationController?.abort();
+  navigationController = new AbortController();
+  const controller = navigationController;
+  clearInterval(heroTimer);
+  document.body.classList.remove('detail-view', 'home-view');
+  document.getElementById('library-count').textContent = '';
+  document.getElementById('content').innerHTML = '<div class="empty-state" role="status">Opening your library…</div>';
+  try {
+    await navigateToRouteImpl(route, options);
+    if (!controller.signal.aborted) document.title = (state.selectedMovieId && state.section === 'movies' ? state.movies.find(m => m.id === state.selectedMovieId)?.title : sectionMeta[state.section].title) + ' · pli';
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    if (options.historyMode !== 'none') setRoute(route, options.historyMode);
+    document.querySelector('.topbar').style.display = '';
+    document.getElementById('content').innerHTML = '<div class="empty-state"><h2>Your cinema is waiting.</h2><p>' + escapeHtml(error.message) + '</p><div><button class="btn btn-primary" id="connect-plex">Open settings</button><button class="btn btn-secondary" id="retry-library">Try again</button></div></div>';
+    document.getElementById('connect-plex').onclick = () => navigateToRoute({section:'settings'});
+    document.getElementById('retry-library').onclick = () => navigateToRoute(route, {historyMode:'none'});
+  }
+}
+
+async function navigateToRouteImpl(route, options = {}) {
   const { historyMode = "push" } = options;
   const section = route.section || "recently-added";
 
   document.querySelector(".topbar").style.display = "";
   state.section = section;
+  state.selectedMovieId = null;
+  document.getElementById("section-eyebrow").textContent = ({movies:"THE COLLECTION", tv:"TELEVISION", settings:"MAKE YOURSELF AT HOME"})[section] || "YOUR LIBRARY";
   state.searchQuery = "";
   const searchInput = document.getElementById("search-input");
   if (searchInput) searchInput.value = "";
@@ -166,7 +199,7 @@ async function navigateToRoute(route, options = {}) {
     state.selectedMovieId = null;
     await loadMovies();
     if (route.movieId && state.movies.some((movie) => movie.id === route.movieId)) {
-      openMovieDetail(route.movieId, { historyMode: "none" });
+      await openMovieDetail(route.movieId, { historyMode: "none" });
     } else {
       renderMovies();
     }
@@ -216,7 +249,7 @@ async function navigateToRoute(route, options = {}) {
 }
 
 function wireSectionNav() {
-  document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
+  document.querySelectorAll("[data-section]").forEach((button) => {
     button.addEventListener("click", async () => {
       const section = button.dataset.section;
       if (!section) return;
@@ -227,8 +260,10 @@ function wireSectionNav() {
 }
 
 function setActiveButton(section) {
-  document.getElementById("sidebar").querySelectorAll(".nav-item[data-section]").forEach((button) => {
+  document.querySelectorAll("[data-section]").forEach((button) => {
     button.classList.toggle("active", button.dataset.section === section);
+    if (button.dataset.section === section) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
 }
 
@@ -256,22 +291,20 @@ async function loadRecentlyAdded() {
 }
 
 async function loadContinueWatching() {
-  try {
-    const response = await fetchJSON("/api/continue-watching");
-    state.continueWatching = response.items ?? [];
-  } catch {
-    state.continueWatching = [];
-  }
+  const response = await fetchJSON("/api/continue-watching");
+  state.continueWatching = response.items ?? [];
 }
 
 async function loadMovies() {
   const response = await fetchJSON("/api/movies");
   state.movies = response.movies ?? [];
+  if (state.section === "movies") document.getElementById("library-count").textContent = `${state.movies.length} FILMS`;
 }
 
 async function loadTVShows() {
   const response = await fetchJSON("/api/tv/shows");
   state.shows = response.shows ?? [];
+  if (state.section === "tv") document.getElementById("library-count").textContent = `${state.shows.length} SERIES`;
 
   if (!state.shows.length) {
     state.selectedShowId = null;
@@ -348,34 +381,35 @@ async function fetchSeasonEpisodes(showId, seasonId) {
 // ---- Search ----
 
 function wireSearch() {
-  const input = document.getElementById("search-input");
-  if (!input) return;
-
-  let debounceTimer;
-  input.addEventListener("input", () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(async () => {
+  const input = document.getElementById('search-input');
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
       const query = input.value.trim();
       if (query.length < 2) {
-        if (state.searchQuery) {
-          state.searchQuery = "";
-          await navigateToRoute({ section: state.section }, { historyMode: "replace" });
-        }
+        if (state.searchQuery) await navigateToRoute(parseRoute(location.pathname), {historyMode:'none'});
         return;
       }
       state.searchQuery = query;
-      await ensureSearchData();
-      const results = performSearch(query);
-      renderSearchResults(results);
-      drawIcons();
-
-      if (!state.searchEpisodesLoaded && !state.searchEpisodesLoading) {
-        void buildEpisodeSearchIndex().then(() => {
-          if (state.searchQuery !== query) return;
-          renderSearchResults(performSearch(query));
-          drawIcons();
-        });
-      }
+      clearInterval(heroTimer);
+      document.body.classList.remove('home-view', 'detail-view');
+      document.querySelector('.topbar').style.display = '';
+      setHeader('Search', 'Films, series, and episodes from your library.');
+      document.getElementById('section-eyebrow').textContent = 'FIND YOUR NEXT WATCH';
+      try {
+        await ensureSearchData();
+        if (input.value.trim() !== query) return;
+        renderSearchResults(performSearch(query));
+        drawIcons();
+        if (!state.searchEpisodesLoaded && !state.searchEpisodesLoading) {
+          void buildEpisodeSearchIndex().then(() => {
+            if (state.searchQuery !== query) return;
+            renderSearchResults(performSearch(query));
+            drawIcons();
+          }).catch(error => { if (error.name !== 'AbortError') notify(error.message); });
+        }
+      } catch (error) { if (error.name !== 'AbortError') notify(error.message); }
     }, 200);
   });
 }
@@ -513,7 +547,7 @@ function performSearch(query) {
   const movies = rankByFuzzy(
     state.movies,
     query,
-    (movie) => `${movie.title} ${movie.year || ""} ${(movie.genres || []).join(" ")}`,
+    (movie) => `${movie.title} ${movie.year || ""} ${(movie.genres || []).join(" ")} ${(movie.directors || []).join(" ")} ${(movie.actors || []).join(" ")}`,
     18,
   );
   const shows = rankByFuzzy(
@@ -609,7 +643,7 @@ function renderSearchResults(results) {
   content.innerHTML = html;
   wirePlayButtons(content);
 
-  content.querySelectorAll("[data-search-show-id]").forEach((node) => {
+  content.querySelectorAll("[data-search-show-id]:not([data-search-episode-id])").forEach((node) => {
     node.addEventListener("click", () => {
       const showId = node.getAttribute("data-search-show-id");
       if (showId) {
@@ -654,96 +688,76 @@ function renderSearchResults(results) {
 // ---- Renderers ----
 
 function renderRecentlyAdded() {
-  const content = document.getElementById("content");
+  const content = document.getElementById('content');
+  document.body.classList.add('home-view');
   if (!state.recent.length && !state.continueWatching.length) {
-    content.innerHTML = `<div class="empty-state">No recent additions yet.</div>`;
+    content.innerHTML = '<div class="empty-state"><h2>A little room for something great.</h2><p>New films and episodes will appear here when you add them to your Plex library.</p></div>';
     return;
   }
-
-  let cwHtml = "";
-  if (state.continueWatching.length) {
-    cwHtml = `
-      <div class="section-label">Continue Watching</div>
-      <div class="cw-row">
-        ${state.continueWatching
-          .map(
-            (item) => `
-          <div class="cw-card" data-resume-type="${escapeHtml(item.type)}" data-resume-id="${escapeHtml(item.id)}" title="Resume">
-            <div class="cw-card-cover">
-              ${renderCover(item.cover_url, item.title)}
-              <button class="play-btn cover-play" data-play-type="${escapeHtml(item.type)}" data-play-id="${escapeHtml(item.id)}" title="Play">
-                <i data-lucide="play"></i>
-              </button>
-              ${progressBar(item.view_offset, item.duration)}
-            </div>
-            <div class="cw-card-title">${escapeHtml(item.title)}</div>
-            ${item.subtitle ? `<div class="cw-card-sub">${escapeHtml(item.subtitle)}</div>` : ""}
-          </div>
-        `,
-          )
-          .join("")}
-      </div>
-    `;
+  const groups = new Map();
+  for (const item of [...state.recent].sort((a, b) => new Date(b.added_at) - new Date(a.added_at))) {
+    const date = new Date(item.added_at);
+    const days = Math.floor((new Date().setHours(0,0,0,0) - new Date(date).setHours(0,0,0,0)) / 86400000);
+    const label = Number.isNaN(date.getTime()) ? 'Recently added' : days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 7 ? 'This week' : date.toLocaleDateString(undefined,{month:'long',day:'numeric'});
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(item);
   }
-
-  content.innerHTML = `
-    ${cwHtml}
-    ${state.recent.length ? `<div class="section-label">Recently Added</div>` : ""}
-    <div class="media-grid">
-      ${state.recent
-        .map(
-          (item) => `
-        <article
-          class="media-card ${item.type === "movie" ? "clickable" : ""}"
-          ${item.type === "movie" ? `data-open-movie-id="${escapeHtml(item.id)}"` : ""}
-        >
-          <div class="media-card-cover">
-            ${renderCover(item.cover_url, item.headline)}
-          </div>
-          <div class="media-card-accent ${escapeHtml(item.type)}"></div>
-          <div class="media-card-body">
-            <div class="media-card-info">
-              <div class="media-card-title">${escapeHtml(item.headline)}</div>
-              ${item.subline ? `<div class="media-card-sub">${escapeHtml(item.subline)}</div>` : ""}
-            </div>
-            <div style="display:flex;align-items:center;gap:0.5rem">
-              <button class="play-btn" data-play-type="${escapeHtml(item.type)}" data-play-id="${escapeHtml(item.id)}" title="Play">
-                <i data-lucide="play"></i>
-              </button>
-              <span class="badge ${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
-            </div>
-          </div>
-        </article>
-      `,
-        )
-        .join("")}
-    </div>
-  `;
+  const shelves = [...groups].map(([label, items]) => '<div class="shelf-group"><div class="shelf-date"><h3>'+escapeHtml(label)+'</h3><span class="mono">'+items.length+' ARRIVALS</span></div><div class="poster-grid">'+items.map(item => {
+    const title = item.title || item.headline;
+    return '<article class="poster-card" tabindex="0" role="button" aria-label="'+escapeHtml(title)+'" data-recent-id="'+escapeHtml(item.id)+'" data-recent-type="'+escapeHtml(item.type)+'"><div class="poster-cover">'+renderCover(item.cover_url,title)+'<div class="poster-overlay"><button class="play-btn" aria-label="Play '+escapeHtml(title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button><p>'+escapeHtml(item.summary || item.subline)+'</p></div></div><div class="poster-title">'+escapeHtml(title)+'</div><div class="poster-caption">'+escapeHtml(item.type === 'episode' ? item.headline.split(' ').at(-1)+' · '+item.subline : item.subline+' · '+(item.genres?.[0] || 'FILM'))+'</div></article>';
+  }).join('')+'</div></div>').join('');
+  const continuing = state.continueWatching.length ? '<section><div class="section-heading"><h2>Continue watching</h2><span class="mono">'+state.continueWatching.length+' IN PROGRESS</span></div><div class="cw-row">'+state.continueWatching.slice(0,6).map(item => {
+    const pct = item.duration ? Math.min(100,Math.round(item.view_offset/item.duration*100)) : 0;
+    const left = Math.max(0, Math.ceil((item.duration-item.view_offset)/60000));
+    return '<article class="cw-card" tabindex="0" role="button" aria-label="Resume '+escapeHtml(item.title)+'" data-resume-id="'+escapeHtml(item.id)+'" data-resume-type="'+escapeHtml(item.type)+'"><div class="cw-card-cover">'+renderCover(item.art_url || item.cover_url,item.title)+'<button class="play-btn cover-play" aria-label="Resume '+escapeHtml(item.title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button>'+progressBar(item.view_offset,item.duration)+'</div><div class="cw-card-title">'+escapeHtml(item.title)+'</div><div class="cw-card-sub">'+escapeHtml(item.subtitle || '')+'</div><div class="cw-progress mono"><span>'+pct+'% WATCHED</span><span>'+left+' MIN LEFT</span></div></article>';
+  }).join('')+'</div></section>' : '';
+  content.innerHTML = '<section id="cinema-hero" class="cinema-hero" aria-label="Featured in your library"></section><div class="home-sections">'+continuing+(shelves ? '<section><div class="section-heading"><h2>Fresh on the shelf</h2><span class="mono">'+state.recent.length+' NEW ARRIVALS</span></div>'+shelves+'</section>' : '')+'</div>';
+  state.heroIndex = 0;
+  renderHero();
+  content.querySelectorAll('[data-recent-id]').forEach(card => card.onclick = event => {
+    if (event.target.closest('button')) return;
+    if (card.dataset.recentType === 'movie') void navigateToRoute({section:'movies',movieId:card.dataset.recentId});
+    else void playItem(card.dataset.recentType,card.dataset.recentId);
+  });
+  content.querySelectorAll('[data-resume-id]').forEach(card => card.onclick = event => {
+    if (!event.target.closest('button')) void playItem(card.dataset.resumeType,card.dataset.resumeId);
+  });
   wirePlayButtons(content);
-  content.querySelectorAll("[data-resume-id]").forEach((card) => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest(".play-btn")) return;
-      const type = card.getAttribute("data-resume-type");
-      const id = card.getAttribute("data-resume-id");
-      if (type && id) {
-        void playItem(type, id);
-      }
-    });
-  });
-  content.querySelectorAll("[data-open-movie-id]").forEach((node) => {
-    node.addEventListener("click", () => {
-      const movieID = node.getAttribute("data-open-movie-id");
-      if (!movieID) {
-        return;
-      }
-      void navigateToRoute({ section: "movies", movieId: movieID }, { historyMode: "push" });
-    });
-  });
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches && state.recent.length > 1) {
+    heroTimer = setInterval(() => {
+      const hero = document.getElementById('cinema-hero');
+      if (!hero || document.hidden || hero.matches(':hover') || hero.contains(document.activeElement)) return;
+      state.heroIndex = (state.heroIndex + 1) % Math.min(4,state.recent.length);
+      renderHero();
+    }, 10000);
+  }
+}
+
+function renderHero() {
+  const hero = document.getElementById('cinema-hero');
+  if (!hero) return;
+  const items = state.recent.length ? state.recent.slice(0,4) : state.continueWatching.slice(0,4);
+  const item = items[state.heroIndex % items.length];
+  const title = item.title || item.headline;
+  const meta = [item.year, formatDuration(item.duration), ...(item.genres || []).slice(0,2), item.directors?.[0] ? 'Dir. '+item.directors[0] : ''].filter(Boolean).join(' / ');
+  hero.innerHTML = '<div class="hero-art" style="--hue:'+posterHue(title)+'">'+(item.art_url ? '<img src="'+escapeHtml(item.art_url)+'" alt="">' : '')+'</div><div class="hero-wordmark" aria-hidden="true">'+escapeHtml(title)+'</div><div class="hero-shade"></div><div class="hero-inner"><div class="hero-copy"><div class="eyebrow">'+(item.type === 'episode' ? 'YOUR NEXT CHAPTER' : 'TONIGHT, SOMETHING GREAT')+'</div><h1>'+escapeHtml(title)+'</h1><div class="hero-meta">'+escapeHtml(meta || item.subline || item.subtitle || 'From your Plex library')+'</div><p class="hero-summary">'+escapeHtml(item.summary || (item.type === 'episode' ? item.subline || item.subtitle : 'Settle in. Your next great watch is right here.'))+'</p><div class="hero-actions"><button class="btn btn-primary" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i>'+(item.view_offset ? 'Resume' : 'Play')+'</button>'+(item.type === 'movie' ? '<button class="btn btn-secondary" id="hero-details">More about this film</button>' : '')+'</div></div><div class="hero-controls"><span class="hero-number">'+String(state.heroIndex+1).padStart(2,'0')+' / '+String(items.length).padStart(2,'0')+'</span><button class="round-button" id="hero-prev" aria-label="Previous featured title"><i data-lucide="arrow-left"></i></button><button class="round-button" id="hero-next" aria-label="Next featured title"><i data-lucide="arrow-right"></i></button></div></div>';
+  hero.querySelector('#hero-details')?.addEventListener('click', () => navigateToRoute({section:'movies',movieId:item.id}));
+  for (const [id, step] of [['hero-prev',-1],['hero-next',1]]) hero.querySelector('#'+id).onclick = () => {
+    state.heroIndex = (state.heroIndex + step + items.length) % items.length;
+    renderHero();
+    document.getElementById(id).focus({preventScroll:true});
+  };
+  wirePlayButtons(hero);
+  drawIcons();
+}
+
+function posterHue(title) {
+  return [...String(title)].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) % 360, 25);
 }
 
 function movieCardHtml(movie) {
   return `
-    <article class="movie-card" data-movie-id="${escapeHtml(movie.id)}">
+    <article class="movie-card" tabindex="0" role="button" aria-label="${escapeHtml(movie.title)}" data-movie-id="${escapeHtml(movie.id)}">
       <div class="movie-card-cover">
         ${renderCover(movie.cover_url, movie.title)}
         <span class="badge cover-badge ${movie.watched ? "watched" : movie.view_offset ? "in-progress" : "unwatched"}">
@@ -851,7 +865,7 @@ function renderMovies() {
   const toolbarHtml = `
     <div class="movie-toolbar">
       <div class="toolbar-left">
-        <select class="toolbar-select" id="movie-sort">
+        <select class="toolbar-select" id="movie-sort" aria-label="Sort movies">
           <option value="title-asc"${state.movieSort === "title-asc" ? " selected" : ""}>Title A–Z</option>
           <option value="title-desc"${state.movieSort === "title-desc" ? " selected" : ""}>Title Z–A</option>
           <option value="year-desc"${state.movieSort === "year-desc" ? " selected" : ""}>Newest</option>
@@ -859,11 +873,11 @@ function renderMovies() {
           <option value="rating-desc"${state.movieSort === "rating-desc" ? " selected" : ""}>Top Rated</option>
           <option value="added-desc"${state.movieSort === "added-desc" ? " selected" : ""}>Recently Added</option>
         </select>
-        <select class="toolbar-select" id="movie-genre">
+        <select class="toolbar-select" id="movie-genre" aria-label="Filter by genre">
           <option value="">All Genres</option>
           ${genres.map((g) => `<option value="${escapeHtml(g)}"${state.movieFilterGenre === g ? " selected" : ""}>${escapeHtml(g)}</option>`).join("")}
         </select>
-        <select class="toolbar-select" id="movie-runtime">
+        <select class="toolbar-select" id="movie-runtime" aria-label="Filter by runtime">
           <option value="all"${state.movieFilterRuntime === "all" ? " selected" : ""}>Any Runtime</option>
           <option value="short"${state.movieFilterRuntime === "short" ? " selected" : ""}>Under 90m</option>
           <option value="feature"${state.movieFilterRuntime === "feature" ? " selected" : ""}>90m to 150m</option>
@@ -893,15 +907,14 @@ function renderMovies() {
     const railHtml = allLetters
       .map((l) => {
         const active = activeLetters.has(l);
-        return `<button class="az-letter ${active ? "" : "disabled"}" ${active ? `data-az-jump="${l}"` : ""}>${l}</button>`;
+        return `<button class="az-letter ${active ? "" : "disabled"}" ${active ? "" : "disabled"} aria-label="Jump to ${l}" ${active ? `data-az-jump="${l}"` : ""}>${l}</button>`;
       })
       .join("");
 
     for (const letter of allLetters) {
       const movies = groups.get(letter);
       if (!movies) continue;
-      gridHtml += `<div class="movie-grid-letter" id="az-${letter}">${letter}</div>`;
-      gridHtml += movies.map(movieCardHtml).join("");
+      gridHtml += `<section class="movie-letter-group"><div class="movie-grid-letter" id="az-${letter}">${letter}</div><div class="poster-grid">${movies.map(movieCardHtml).join("")}</div></section>`;
     }
 
     content.innerHTML = `
@@ -995,6 +1008,11 @@ async function openMovieDetail(movieID, options = {}) {
     return;
   }
   state.selectedMovieId = movie.id;
+  state.section = "movies";
+  setActiveButton("movies");
+  document.body.classList.remove("home-view");
+  document.body.classList.add("detail-view");
+  clearInterval(heroTimer);
   document.querySelector(".topbar").style.display = "none";
   renderMovieDetail(movie);
   if (historyMode !== "none") {
@@ -1105,7 +1123,7 @@ function renderMovieDetail(movie) {
             ${progressBar(movie.view_offset, movie.duration)}
           </div>
         <div class="movie-detail-body">
-          <h2 class="movie-detail-title">${escapeHtml(movie.title)}</h2>
+          <div class="eyebrow">${movie.directors?.length ? `A ${escapeHtml(movie.directors[0])} film` : "FROM YOUR COLLECTION"}</div><h1 class="movie-detail-title">${escapeHtml(movie.title)}</h1>
           ${movie.tagline ? `<p class="movie-detail-tagline">${escapeHtml(movie.tagline)}</p>` : ""}
           <div class="movie-detail-meta-line">
             ${metaLine}
@@ -1122,7 +1140,7 @@ function renderMovieDetail(movie) {
           <div class="movie-detail-actions">
             <button class="movie-play-btn" data-play-type="movie" data-play-id="${escapeHtml(movie.id)}">
               <span class="movie-play-icon"><i data-lucide="play"></i></span>
-              <span class="movie-play-label">Play Movie</span>
+              <span class="movie-play-label">${movie.view_offset && !movie.watched ? "Resume Movie" : "Play Movie"}</span>
             </button>
           </div>
         </div>
@@ -1132,6 +1150,7 @@ function renderMovieDetail(movie) {
 
   document.getElementById("movie-detail-back").addEventListener("click", () => {
     state.selectedMovieId = null;
+    document.body.classList.remove("detail-view");
     document.querySelector(".topbar").style.display = "";
     setHeader(sectionMeta.movies.title, sectionMeta.movies.description);
     renderMovies();
@@ -1171,10 +1190,10 @@ function renderTV() {
         <div class="show-list">
           ${state.shows
             .map((show) => {
-              const pct = show.total_episodes > 0 ? Math.round((show.watched_count / show.total_episodes) * 100) : 0;
+              const pct = show.total_episodes > 0 ? Math.min(100, Math.round((show.watched_count / show.total_episodes) * 100)) : 0;
               const isComplete = pct === 100;
               return `
-              <div class="show-item ${show.id === state.selectedShowId ? "active" : ""}" data-show-id="${escapeHtml(show.id)}">
+              <div tabindex="0" role="button" aria-label="${escapeHtml(show.title)}" class="show-item ${show.id === state.selectedShowId ? "active" : ""}" data-show-id="${escapeHtml(show.id)}">
                 <div class="show-item-cover">
                   ${renderCover(show.cover_url, show.title)}
                 </div>
@@ -1237,32 +1256,22 @@ function renderTV() {
               .map(
                 (episode) => `
               <div class="episode-item-wrapper ${state.highlightedEpisodeId === episode.id ? "episode-highlight" : ""}" data-episode-id="${escapeHtml(episode.id)}">
-                <div class="episode-item" data-episode-toggle>
-                  <span class="episode-num">E${String(episode.episode_number).padStart(2, "0")}</span>
-                  ${progressRing(episode.view_offset, episode.duration)}
+                <div class="episode-still" style="--hue:${posterHue(state.selectedShowTitle)}">
+                  ${episode.cover_url ? renderCover(episode.cover_url, episode.title) : ''}
+                  <span class="episode-num">${String(episode.episode_number).padStart(2, '0')}</span>
+                  ${episode.is_next_up ? '<span class="badge next">NEXT UP</span>' : episode.watched ? '<span class="badge watched">WATCHED</span>' : ''}
+                  <button class="play-btn" data-episode-play-id="${escapeHtml(episode.id)}" aria-label="Play ${escapeHtml(episode.title)}"><i data-lucide="play"></i></button>
+                  ${progressBar(episode.view_offset, episode.duration)}
+                </div>
+                <div class="episode-item" data-episode-toggle tabindex="0" role="button" aria-expanded="false">
                   <span class="episode-title">${escapeHtml(episode.title)}</span>
-                  <div class="episode-badges">
-                    ${episode.is_next_up ? '<span class="badge next">Next Up</span>' : ""}
-                    <span class="badge ${episode.watched ? "watched" : episode.view_offset ? "in-progress" : "unwatched"}">
-                      ${episode.watched ? "Watched" : episode.view_offset ? "In Progress" : "Unwatched"}
-                    </span>
-                    <button
-                      class="play-btn"
-                      data-episode-play-id="${escapeHtml(episode.id)}"
-                      title="Play"
-                    >
-                      <i data-lucide="play"></i>
-                    </button>
-                    <div class="overflow-menu">
-                      <button class="overflow-menu-trigger" aria-label="More options">
-                        <i data-lucide="ellipsis-vertical"></i>
+                  <span class="mono">${formatDuration(episode.duration)}</span>
+                  <div class="overflow-menu">
+                    <button class="overflow-menu-trigger" aria-label="Options for ${escapeHtml(episode.title)}"><i data-lucide="ellipsis-vertical"></i></button>
+                    <div class="overflow-menu-dropdown">
+                      <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(episode.id)}" data-mark-watched="${episode.watched || episode.view_offset ? 'false' : 'true'}">
+                        <i data-lucide="${episode.watched || episode.view_offset ? 'eye-off' : 'eye'}"></i>${episode.watched || episode.view_offset ? 'Mark Unwatched' : 'Mark Watched'}
                       </button>
-                      <div class="overflow-menu-dropdown">
-                        <button class="overflow-menu-item" data-toggle-watched data-rating-key="${escapeHtml(episode.id)}" data-mark-watched="${episode.watched || episode.view_offset ? "false" : "true"}">
-                          <i data-lucide="${episode.watched || episode.view_offset ? "eye-off" : "eye"}"></i>
-                          ${episode.watched || episode.view_offset ? "Mark Unwatched" : "Mark Watched"}
-                        </button>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1337,7 +1346,7 @@ function renderTV() {
     row.addEventListener("click", (e) => {
       if (e.target.closest(".play-btn, .overflow-menu")) return;
       const wrapper = row.closest(".episode-item-wrapper");
-      if (wrapper) wrapper.classList.toggle("expanded");
+      if (wrapper) { wrapper.classList.toggle("expanded"); row.setAttribute("aria-expanded", String(wrapper.classList.contains("expanded"))); }
     });
   });
 
@@ -1371,7 +1380,7 @@ function renderSettings() {
         <div class="auth-actions">
           ${
             hasToken
-              ? `<span class="auth-status"><span class="auth-status-dot"></span>Authenticated</span>
+              ? `<span class="auth-status"><span class="auth-status-dot"></span>Token saved</span>
                  <button class="btn btn-secondary" id="plex-auth-btn">Re-authenticate</button>`
               : `<button class="btn btn-primary" id="plex-auth-btn">Sign in with Plex</button>`
           }
@@ -1379,6 +1388,15 @@ function renderSettings() {
         <span class="form-help">Authenticate with your Plex account to connect your library.</span>
       </div>
 
+      <div class="form-group">
+        <label class="form-label" for="plex-token">Plex token</label>
+        <input class="form-input" id="plex-token" type="password" autocomplete="off" value="${escapeHtml(getConfig('plex.token'))}" />
+        <span class="form-help">Sign in above, or enter an existing server token.</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="player-default">Open videos with</label>
+        <select class="form-input" id="player-default"><option value="iina" ${getConfig('player.default') === 'iina' ? 'selected' : ''}>IINA</option><option value="vlc" ${getConfig('player.default') === 'vlc' ? 'selected' : ''}>VLC</option></select>
+      </div>
       <div class="form-actions">
         <button class="btn btn-primary" id="settings-save">Save</button>
         <button class="btn btn-secondary" id="settings-test">Test Connection</button>
@@ -1395,6 +1413,10 @@ function renderSettings() {
     const baseUrl = document.getElementById("plex-url").value.trim();
 
     const updates = [];
+    for (const [key, id] of [['plex.token','plex-token'], ['player.default','player-default']]) {
+      const value = document.getElementById(id).value.trim();
+      if (value !== getConfig(key)) updates.push({key,value});
+    }
     if (baseUrl !== getConfig("plex.base_url")) {
       updates.push({ key: "plex.base_url", value: baseUrl });
     }
@@ -1411,6 +1433,7 @@ function renderSettings() {
       }
       await loadConfig();
       statusEl.className = "settings-status success";
+      clearLibraryData();
       statusEl.textContent = "Settings saved.";
     } catch (err) {
       statusEl.className = "settings-status error";
@@ -1421,7 +1444,7 @@ function renderSettings() {
   document.getElementById("settings-test").addEventListener("click", async () => {
     const statusEl = document.getElementById("settings-status");
     const baseUrl = document.getElementById("plex-url").value.trim();
-    const token = getConfig("plex.token");
+    const token = document.getElementById("plex-token").value.trim();
 
     statusEl.className = "settings-status";
     statusEl.textContent = "Testing connection...";
@@ -1443,55 +1466,77 @@ function renderSettings() {
 }
 
 async function startPlexAuth() {
+  authController?.abort();
+  const controller = new AbortController();
+  authController = controller;
   const statusEl = document.getElementById("settings-status");
+  const button = document.getElementById("plex-auth-btn");
+  button.disabled = true;
   statusEl.className = "settings-status";
   statusEl.textContent = "Starting Plex authentication...";
 
+  const popup = window.open("about:blank", "plexAuth", "width=800,height=700");
+  let pollTimer;
+  const timeout = setTimeout(() => {
+    statusEl.className = "settings-status error";
+    statusEl.textContent = "Authentication timed out. Please try again.";
+    controller.abort();
+  }, 5 * 60 * 1000);
+  controller.signal.addEventListener('abort', () => {
+    clearTimeout(pollTimer);
+    clearTimeout(timeout);
+    button.disabled = false;
+    if (popup && !popup.closed) popup.close();
+  });
   let pin;
   try {
     pin = await postJSON("/api/plex/auth/start", {});
+    if (controller.signal.aborted) return;
   } catch (err) {
+    if (controller.signal.aborted) return;
     statusEl.className = "settings-status error";
     statusEl.textContent = err.message;
+    controller.abort();
     return;
   }
 
-  const popup = window.open(pin.auth_url, "plexAuth", "width=800,height=700");
-
+  if (popup) popup.location.href = pin.auth_url;
   statusEl.className = "settings-status";
-  statusEl.textContent = "Waiting for Plex authentication...";
+  statusEl.innerHTML = `Waiting for Plex authentication… <a href="${escapeHtml(pin.auth_url)}" target="_blank" rel="noopener">Open Plex sign-in</a>`;
 
-  const pollInterval = setInterval(async () => {
+  const poll = async () => {
     try {
-      const result = await fetchJSON(`/api/plex/auth/poll/${pin.pin_id}?code=${encodeURIComponent(pin.code)}`);
+      const response = await fetch(`/api/plex/auth/poll/${pin.pin_id}?code=${encodeURIComponent(pin.code)}`, { signal: controller.signal });
+      if (!response.ok) throw new Error('Plex authentication is not ready');
+      const result = await response.json();
       if (result.done) {
-        clearInterval(pollInterval);
-        if (popup && !popup.closed) popup.close();
+        const draftUrl = document.getElementById('plex-url').value;
+        const draftPlayer = document.getElementById('player-default').value;
         await loadConfig();
-        statusEl.className = "settings-status success";
-        statusEl.textContent = "Authenticated successfully.";
+        if (controller.signal.aborted) return;
+        clearLibraryData();
+        controller.abort();
         renderSettings();
+        document.getElementById('plex-url').value = draftUrl;
+        document.getElementById('player-default').value = draftPlayer;
+        const success = document.getElementById('settings-status');
+        success.className = 'settings-status success';
+        success.textContent = 'Authenticated successfully. Save any server address changes, then test the connection.';
         drawIcons();
+        return;
       }
     } catch {
       // Ignore transient errors and keep polling.
     }
-  }, 3000);
-
-  // Stop polling after 5 minutes.
-  setTimeout(() => {
-    clearInterval(pollInterval);
-    if (statusEl.textContent === "Waiting for Plex authentication...") {
-      statusEl.className = "settings-status error";
-      statusEl.textContent = "Authentication timed out.";
-    }
-  }, 5 * 60 * 1000);
+    if (!controller.signal.aborted) pollTimer = setTimeout(poll, 3000);
+  };
+  pollTimer = setTimeout(poll, 3000);
 }
 
 // ---- Utilities ----
 
 async function fetchJSON(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  const response = await fetch(path, { headers: { Accept: "application/json" }, signal: navigationController?.signal });
   if (!response.ok) {
     const payload = await safeJSON(response);
     throw new Error(payload?.error || `Request failed: ${response.status}`);
@@ -1508,10 +1553,8 @@ async function safeJSON(response) {
 }
 
 function renderCover(url, alt) {
-  if (!url) {
-    return `<div class="cover-fallback"><i data-lucide="image-off"></i></div>`;
-  }
-  return `<img class="cover-image" src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy" />`;
+  if (!url) return '<div class="cover-fallback" style="--hue:'+posterHue(alt)+'"><span class="poster-imprint">THE PLI COLLECTION</span><span class="poster-type">'+escapeHtml(alt)+'</span><span class="poster-bottom">A WORLD WORTH WATCHING</span></div>';
+  return '<img class="cover-image" src="'+escapeHtml(url)+'" alt="'+escapeHtml(alt)+'" loading="lazy">';
 }
 
 function drawIcons() {
@@ -1590,24 +1633,13 @@ async function playItem(type, id) {
   try {
     const result = await postJSON("/api/play", { type, id: String(id) });
     if (result.stream_url) {
-      const streamUrl = new URL(result.stream_url);
-      if (result.display_title) {
-        streamUrl.searchParams.set("X-Pli-Display-Title", result.display_title);
-      }
-      if (result.rating_key) {
-        streamUrl.searchParams.set("X-Pli-Rating-Key", result.rating_key);
-      }
-      if (result.duration_ms) {
-        streamUrl.searchParams.set("X-Pli-Duration", String(result.duration_ms));
-      }
-      streamUrl.searchParams.set("X-Pli-Start", String(result.view_offset_ms || 0));
-      streamUrl.searchParams.set("X-Pli-Callback", window.location.origin + "/api/timeline");
-      streamUrl.searchParams.set("X-Pli-Session", String(Date.now()));
-      window.location.href = "iina://weblink?url=" + encodeURIComponent(streamUrl.toString());
+      const player = state.config.find(c => c.key === "player.default")?.value || "iina";
+      window.location.href = playerURL(result, player, window.location.origin);
+      notify(`Opening in ${player === "vlc" ? "VLC" : "IINA"}…`);
     }
     return result;
   } catch (err) {
-    console.error("play failed:", err.message);
+    notify(err.message);
     return null;
   }
 }
@@ -1650,9 +1682,11 @@ function wireOverflowMenus(container, handlers = {}) {
         dropdown.classList.remove("open");
         try {
           await postJSON("/api/watched", { rating_key: ratingKey, watched: markWatched });
+          state.searchEpisodesLoaded = false;
+          state.seasonEpisodeCache = {};
           if (onUpdate) await onUpdate();
         } catch (err) {
-          console.error("toggle watched failed:", err.message);
+          notify(err.message);
         }
       });
     });
@@ -1685,7 +1719,7 @@ function wireOverflowMenus(container, handlers = {}) {
             await onUpdate();
           }
         } catch (err) {
-          console.error("delete media failed:", err.message);
+          notify(err.message);
         }
       });
     });
@@ -1705,3 +1739,42 @@ function wirePlayButtons(container) {
     });
   });
 }
+
+function notify(message) {
+  const notification = document.getElementById('notification');
+  notification.textContent = message;
+  notification.hidden = false;
+  clearTimeout(notificationTimer);
+  notificationTimer = setTimeout(() => { notification.hidden = true; }, 5500);
+}
+
+function clearLibraryData() {
+  state.movies = [];
+  state.shows = [];
+  state.seasonEpisodeCache = {};
+  state.searchEpisodes = [];
+  state.searchEpisodesLoaded = false;
+  state.selectedShowId = null;
+  state.selectedSeasonId = null;
+}
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    document.querySelectorAll('.overflow-menu-dropdown.open').forEach(menu => menu.classList.remove('open'));
+    if (document.activeElement?.id === 'search-input') {
+      document.activeElement.value = '';
+      document.activeElement.dispatchEvent(new Event('input'));
+    }
+  }
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[role="button"][tabindex="0"]')) {
+    event.preventDefault();
+    event.target.click();
+  }
+});
+
+document.addEventListener('error', event => {
+  if (event.target.matches?.('img.cover-image')) {
+    const title = event.target.alt;
+    event.target.outerHTML = renderCover('', title);
+  }
+}, true);

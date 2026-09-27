@@ -1,0 +1,13 @@
+{
+  "name": "pli-browser-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pretest": "cargo build --locked",
+    "test": "node --test tests/player.test.mjs && playwright test",
+    "preview": "node tests/fixture.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

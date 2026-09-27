@@ -99,6 +99,8 @@ svg { vertical-align: middle; flex-shrink: 0; }
 .poster-type { position: relative; font: clamp(23px,2.7vw,48px)/.95 var(--serif); text-align: center; text-wrap: balance; margin: auto 0; text-shadow: 0 2px 30px #0005; }
 .poster-bottom { font: 8px var(--mono); letter-spacing: .2em; position: relative; }
 .poster-title, .movie-card-title { margin-top: 14px; font-weight: 500; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.show-title-link { display: block; width: 100%; padding: 0; text-align: left; }
+.show-title-link:hover { color: var(--amber); }
 .poster-caption, .movie-card-year { margin-top: 4px; color: var(--dim); font: 10px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .movie-card-year { margin-top: 13px; }
 .movie-card-title { margin-top: 3px; }

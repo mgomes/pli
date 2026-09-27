@@ -4,6 +4,7 @@ let heroTimer;
 let notificationTimer;
 let navigationController;
 let authController;
+let episodeIndexController;
 
 const state = {
   heroIndex: 0,
@@ -365,14 +366,17 @@ function seasonCacheKey(showId, seasonId) {
   return `${showId}:${seasonId}`;
 }
 
-async function fetchSeasonEpisodes(showId, seasonId) {
+async function fetchSeasonEpisodes(showId, seasonId, signal) {
+  signal?.throwIfAborted();
   const key = seasonCacheKey(showId, seasonId);
   if (state.seasonEpisodeCache[key]) {
     return state.seasonEpisodeCache[key];
   }
   const response = await fetchJSON(
     `/api/tv/seasons/${encodeURIComponent(seasonId)}/episodes?show_id=${encodeURIComponent(showId)}`,
+    signal,
   );
+  signal?.throwIfAborted();
   const episodes = response.episodes ?? [];
   state.seasonEpisodeCache[key] = episodes;
   return episodes;
@@ -402,7 +406,7 @@ function wireSearch() {
         if (input.value.trim() !== query) return;
         renderSearchResults(performSearch(query));
         drawIcons();
-        if (!state.searchEpisodesLoaded && !state.searchEpisodesLoading) {
+        if (!state.searchEpisodesLoaded) {
           void buildEpisodeSearchIndex().then(() => {
             if (state.searchQuery !== query) return;
             renderSearchResults(performSearch(query));
@@ -430,31 +434,24 @@ async function buildEpisodeSearchIndex() {
     return;
   }
 
-  state.searchEpisodesLoading = (async () => {
-    await ensureSearchData();
+  const controller = new AbortController();
+  episodeIndexController = controller;
+  const shows = [...state.shows];
+  const loading = (async () => {
     const episodes = [];
     const concurrency = 4;
 
-    for (let i = 0; i < state.shows.length; i += concurrency) {
-      const batch = state.shows.slice(i, i + concurrency);
-      const batchResults = await Promise.allSettled(
+    for (let i = 0; i < shows.length; i += concurrency) {
+      controller.signal.throwIfAborted();
+      const batch = shows.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
         batch.map(async (show) => {
-          let seasons = [];
-          try {
-            const seasonsResponse = await fetchJSON(`/api/tv/shows/${encodeURIComponent(show.id)}/seasons`);
-            seasons = seasonsResponse.seasons ?? [];
-          } catch {
-            return [];
-          }
+          const seasonsResponse = await fetchJSON(`/api/tv/shows/${encodeURIComponent(show.id)}/seasons`, controller.signal);
+          const seasons = seasonsResponse.seasons ?? [];
 
           const showEpisodes = [];
           for (const season of seasons) {
-            let seasonEpisodes = [];
-            try {
-              seasonEpisodes = await fetchSeasonEpisodes(show.id, season.id);
-            } catch {
-              continue;
-            }
+            const seasonEpisodes = await fetchSeasonEpisodes(show.id, season.id, controller.signal);
 
             for (const episode of seasonEpisodes) {
               showEpisodes.push({
@@ -476,21 +473,21 @@ async function buildEpisodeSearchIndex() {
         }),
       );
 
-      for (const result of batchResults) {
-        if (result.status === "fulfilled" && result.value.length) {
-          episodes.push(...result.value);
-        }
-      }
+      episodes.push(...batchResults.flat());
     }
 
+    controller.signal.throwIfAborted();
     state.searchEpisodes = episodes;
     state.searchEpisodesLoaded = true;
   })();
+  state.searchEpisodesLoading = loading;
 
   try {
-    await state.searchEpisodesLoading;
+    await loading;
   } finally {
-    state.searchEpisodesLoading = null;
+    controller.abort();
+    if (state.searchEpisodesLoading === loading) state.searchEpisodesLoading = null;
+    if (episodeIndexController === controller) episodeIndexController = null;
   }
 }
 
@@ -1535,8 +1532,8 @@ async function startPlexAuth() {
 
 // ---- Utilities ----
 
-async function fetchJSON(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" }, signal: navigationController?.signal });
+async function fetchJSON(path, signal = navigationController?.signal) {
+  const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) {
     const payload = await safeJSON(response);
     throw new Error(payload?.error || `Request failed: ${response.status}`);
@@ -1749,6 +1746,9 @@ function notify(message) {
 }
 
 function clearLibraryData() {
+  episodeIndexController?.abort();
+  episodeIndexController = null;
+  state.searchEpisodesLoading = null;
   state.movies = [];
   state.shows = [];
   state.seasonEpisodeCache = {};

@@ -156,6 +156,46 @@ test('settings, watched toggle and confirmed deletion work through the UI', asyn
   expect(calls.filter(c=>c.method==='DELETE' && c.path==='/library/metadata/m7')).toHaveLength(1);
 });
 
+test('episode indexing survives navigation while a show request is pending', async ({page}) => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  let started;
+  const indexing = new Promise(resolve => { started = resolve; });
+  await page.route('**/api/tv/shows/s3/seasons', async route => {
+    started();
+    await pending;
+    await route.continue();
+  });
+  await page.goto('/movies');
+  await expect(page.locator('.movie-card')).toHaveCount(23);
+  const lastSeason = page.waitForResponse('**/api/tv/seasons/s8-2/episodes?*');
+  await page.getByRole('searchbox').fill("Trojan's Horse");
+  await indexing;
+  await page.getByRole('button',{name:'Movies',exact:true}).click();
+  await expect(page.locator('.movie-card')).toHaveCount(23);
+  release();
+  await lastSeason;
+  await page.getByRole('searchbox').fill("Trojan's Horse");
+  await expect(page.locator('[data-search-episode-id="s3-2-5"]')).toBeVisible();
+});
+
+test('episode search retries a season that failed during indexing', async ({page}) => {
+  let fail = true;
+  await page.route('**/api/tv/seasons/s3-2/episodes?*', async route => {
+    if (fail) {
+      fail = false;
+      await route.fulfill({status:503,json:{error:'Temporary episode lookup failure'}});
+    } else {
+      await route.continue();
+    }
+  });
+  await page.goto('/movies');
+  await page.getByRole('searchbox').fill("Trojan's Horse");
+  await expect(page.locator('#notification')).toHaveText('Temporary episode lookup failure');
+  await page.getByRole('searchbox').fill('Trojan');
+  await expect(page.locator('[data-search-episode-id="s3-2-5"]')).toBeVisible();
+});
+
 test('Plex sign-in survives blocked popups and saves the authorized token', async ({page,request}) => {
   await page.addInitScript(() => { window.open = () => null; });
   await page.route('**/api/plex/auth/start', route => route.fulfill({json:{pin_id:123,code:'test-code',auth_url:'https://app.plex.tv/auth#?test'}}));

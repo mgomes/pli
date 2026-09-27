@@ -1,0 +1,31 @@
+[package]
+name = "pli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "query", "rustls"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toasty = { version = "0.7", features = ["sqlite"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "fs"] }
+topcoat = { version = "0.9", default-features = false, features = ["router", "serve", "view", "anyhow"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = "thin"
+strip = true

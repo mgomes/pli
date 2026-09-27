@@ -701,12 +701,18 @@ function renderRecentlyAdded() {
   }
   const shelves = [...groups].map(([label, items]) => '<div class="shelf-group"><div class="shelf-date"><h3>'+escapeHtml(label)+'</h3><span class="mono">'+items.length+' ARRIVALS</span></div><div class="poster-grid">'+items.map(item => {
     const title = item.title || item.headline;
-    return '<article class="poster-card" tabindex="0" role="button" aria-label="'+escapeHtml(title)+'" data-recent-id="'+escapeHtml(item.id)+'" data-recent-type="'+escapeHtml(item.type)+'"><div class="poster-cover">'+renderCover(item.cover_url,title)+'<div class="poster-overlay"><button class="play-btn" aria-label="Play '+escapeHtml(title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button><p>'+escapeHtml(item.summary || item.subline)+'</p></div></div><div class="poster-title">'+escapeHtml(title)+'</div><div class="poster-caption">'+escapeHtml(item.type === 'episode' ? item.headline.split(' ').at(-1)+' · '+item.subline : item.subline+' · '+(item.genres?.[0] || 'FILM'))+'</div></article>';
+    const titleMarkup = item.type === 'episode' && item.show_id
+      ? '<button type="button" class="poster-title show-title-link" data-show-link-id="'+escapeHtml(item.show_id)+'" aria-label="Open '+escapeHtml(title)+'">'+escapeHtml(title)+'</button>'
+      : '<div class="poster-title">'+escapeHtml(title)+'</div>';
+    return '<article class="poster-card" tabindex="0" role="button" aria-label="'+escapeHtml(title)+'" data-recent-id="'+escapeHtml(item.id)+'" data-recent-type="'+escapeHtml(item.type)+'"><div class="poster-cover">'+renderCover(item.cover_url,title)+'<div class="poster-overlay"><button class="play-btn" aria-label="Play '+escapeHtml(title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button><p>'+escapeHtml(item.summary || item.subline)+'</p></div></div>'+titleMarkup+'<div class="poster-caption">'+escapeHtml(item.type === 'episode' ? item.headline.split(' ').at(-1)+' · '+item.subline : item.subline+' · '+(item.genres?.[0] || 'FILM'))+'</div></article>';
   }).join('')+'</div></div>').join('');
   const continuing = state.continueWatching.length ? '<section><div class="section-heading"><h2>Continue watching</h2><span class="mono">'+state.continueWatching.length+' IN PROGRESS</span></div><div class="cw-row">'+state.continueWatching.slice(0,6).map(item => {
     const pct = item.duration ? Math.min(100,Math.round(item.view_offset/item.duration*100)) : 0;
     const left = Math.max(0, Math.ceil((item.duration-item.view_offset)/60000));
-    return '<article class="cw-card" tabindex="0" role="button" aria-label="Resume '+escapeHtml(item.title)+'" data-resume-id="'+escapeHtml(item.id)+'" data-resume-type="'+escapeHtml(item.type)+'"><div class="cw-card-cover">'+renderCover(item.art_url || item.cover_url,item.title)+'<button class="play-btn cover-play" aria-label="Resume '+escapeHtml(item.title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button>'+progressBar(item.view_offset,item.duration)+'</div><div class="cw-card-title">'+escapeHtml(item.title)+'</div><div class="cw-card-sub">'+escapeHtml(item.subtitle || '')+'</div><div class="cw-progress mono"><span>'+pct+'% WATCHED</span><span>'+left+' MIN LEFT</span></div></article>';
+    const titleMarkup = item.type === 'episode' && item.show_id
+      ? '<button type="button" class="cw-card-title show-title-link" data-show-link-id="'+escapeHtml(item.show_id)+'" aria-label="Open '+escapeHtml(item.title)+'">'+escapeHtml(item.title)+'</button>'
+      : '<div class="cw-card-title">'+escapeHtml(item.title)+'</div>';
+    return '<article class="cw-card" tabindex="0" role="button" aria-label="Resume '+escapeHtml(item.title)+'" data-resume-id="'+escapeHtml(item.id)+'" data-resume-type="'+escapeHtml(item.type)+'"><div class="cw-card-cover">'+renderCover(item.art_url || item.cover_url,item.title)+'<button class="play-btn cover-play" aria-label="Resume '+escapeHtml(item.title)+'" data-play-type="'+escapeHtml(item.type)+'" data-play-id="'+escapeHtml(item.id)+'"><i data-lucide="play"></i></button>'+progressBar(item.view_offset,item.duration)+'</div>'+titleMarkup+'<div class="cw-card-sub">'+escapeHtml(item.subtitle || '')+'</div><div class="cw-progress mono"><span>'+pct+'% WATCHED</span><span>'+left+' MIN LEFT</span></div></article>';
   }).join('')+'</div></section>' : '';
   content.innerHTML = '<section id="cinema-hero" class="cinema-hero" aria-label="Featured in your library"></section><div class="home-sections">'+continuing+(shelves ? '<section><div class="section-heading"><h2>Fresh on the shelf</h2><span class="mono">'+state.recent.length+' NEW ARRIVALS</span></div>'+shelves+'</section>' : '')+'</div>';
   state.heroIndex = 0;
@@ -719,6 +725,10 @@ function renderRecentlyAdded() {
   content.querySelectorAll('[data-resume-id]').forEach(card => card.onclick = event => {
     if (!event.target.closest('button')) void playItem(card.dataset.resumeType,card.dataset.resumeId);
   });
+  content.querySelectorAll('[data-show-link-id]').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
+    void navigateToRoute({section:'tv',showId:button.dataset.showLinkId}, {historyMode:'push'});
+  }));
   wirePlayButtons(content);
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches && state.recent.length > 1) {
     heroTimer = setInterval(() => {

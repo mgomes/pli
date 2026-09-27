@@ -222,7 +222,8 @@ impl Node {
                 },
             )
         };
-        json!({"id": self.rating_key(), "type": self.kind, "headline": headline, "subline": subline,
+        json!({"id": self.rating_key(), "type": self.kind, "show_id": self.show_id,
+            "headline": headline, "subline": subline,
             "title": if self.kind == "episode" { &self.show_title } else { &self.title },
             "added_at": timestamp(self.added_at), "year": self.year, "duration": self.duration,
             "summary": self.summary, "genres": tags(&self.genres, 3), "directors": tags(&self.directors, 2),
@@ -242,7 +243,7 @@ impl Node {
         } else {
             String::new()
         };
-        json!({"id": self.rating_key(), "type": self.kind,
+        json!({"id": self.rating_key(), "type": self.kind, "show_id": self.show_id,
             "title": if self.kind == "episode" { &self.show_title } else { &self.title }, "subtitle": subtitle,
             "cover_url": image_url(first(&[&self.show_thumb, &self.parent_thumb, &self.thumb])),
             "art_url": image_url(first(&[&self.art, &self.show_art])),

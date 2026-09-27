@@ -218,6 +218,27 @@ test('Plex sign-in survives blocked popups and saves the authorized token', asyn
   await expect(page.locator('#plex-token')).toHaveValue('new-fixture-token');
 });
 
+test('one settings Save rejects invalid batches without partial changes', async ({page,request}) => {
+  await request.put('/api/config',{data:{key:'plex.token',value:'original-fixture-token'}});
+  await request.put('/api/config',{data:{key:'player.default',value:'iina'}});
+  await page.goto('/settings');
+  await page.locator('#plex-token').fill('replacement-fixture-token');
+  await page.selectOption('#player-default','vlc');
+  await page.locator('#plex-url').fill('file:///invalid-server');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await expect(page.locator('#settings-status')).toHaveClass('settings-status error');
+  const config = async () => Object.fromEntries((await (await request.get('/api/config')).json()).configs.map(c=>[c.key,c.value]));
+  expect(await config()).toMatchObject({'plex.base_url':fixture,'plex.token':'original-fixture-token','player.default':'iina'});
+  await page.reload();
+  await expect(page.locator('#plex-token')).toHaveValue('original-fixture-token');
+  await expect(page.locator('#player-default')).toHaveValue('iina');
+  await page.locator('#plex-token').fill('replacement-fixture-token');
+  await page.selectOption('#player-default','vlc');
+  await page.getByRole('button',{name:'Save',exact:true}).click();
+  await expect(page.locator('#settings-status')).toHaveText('Settings saved.');
+  expect(await config()).toMatchObject({'plex.base_url':fixture,'plex.token':'replacement-fixture-token','player.default':'vlc'});
+});
+
 test('search expands smoothly on focus and respects reduced motion', async ({page}) => {
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.goto('/settings');

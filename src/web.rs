@@ -180,35 +180,62 @@ struct ConfigInput {
     value: String,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ConfigUpdate {
+    Single(ConfigInput),
+    Batch { updates: Vec<ConfigInput> },
+}
+
 #[route(PUT "/api/config")]
-async fn update_config(cx: &Cx, Json(input): Json<ConfigInput>) -> Result<Response> {
-    match input.key.as_str() {
-        "plex.base_url" => {
-            if let Err(e) = plex::validate_base(&input.value) {
-                return bad(&e.to_string());
-            }
-        }
-        "player.default" => {
-            if !matches!(input.value.as_str(), "iina" | "vlc") {
-                return bad("Choose IINA or VLC");
-            }
-        }
-        "plex.client_id" => {
-            if input.value.trim().is_empty() {
-                return bad("Client ID is required");
-            }
-        }
-        "plex.token" => {}
-        _ => return bad("Unknown configuration key"),
+async fn update_config(cx: &Cx, Json(input): Json<ConfigUpdate>) -> Result<Response> {
+    let mut updates = match input {
+        ConfigUpdate::Single(input) => vec![input],
+        ConfigUpdate::Batch { updates } => updates,
+    };
+    if updates.is_empty() || updates.len() > 4 {
+        return bad("Provide between one and four settings");
     }
-    if input.value.len() > 8192 {
-        return bad("Configuration value is too long");
+    let mut keys = std::collections::HashSet::new();
+    for input in &mut updates {
+        input.value = input.value.trim().to_owned();
+        if !keys.insert(input.key.as_str()) {
+            return bad("Each setting may appear only once");
+        }
+        if let Err(error) = validate_config(input) {
+            return bad(&error.to_string());
+        }
     }
     api(async {
-        app(cx).store.set(&input.key, input.value.trim()).await?;
-        Ok(ok())
+        let settings: Vec<_> = updates
+            .iter()
+            .map(|input| (input.key.as_str(), input.value.as_str()))
+            .collect();
+        let configs = app(cx).store.set_many(&settings).await?;
+        Ok(json!({"status": "ok", "configs": configs}))
     }
     .await)
+}
+
+fn validate_config(input: &ConfigInput) -> AnyResult<()> {
+    anyhow::ensure!(input.value.len() <= 8192, "Configuration value is too long");
+    match input.key.as_str() {
+        "plex.base_url" => {
+            plex::validate_base(&input.value)?;
+        }
+        "player.default" => {
+            anyhow::ensure!(
+                matches!(input.value.as_str(), "iina" | "vlc"),
+                "Choose IINA or VLC"
+            );
+        }
+        "plex.client_id" => {
+            anyhow::ensure!(!input.value.is_empty(), "Client ID is required");
+        }
+        "plex.token" => {}
+        _ => anyhow::bail!("Unknown configuration key"),
+    }
+    Ok(())
 }
 
 #[route(GET "/api/recently-added")]

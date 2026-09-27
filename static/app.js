@@ -1425,10 +1425,8 @@ function renderSettings() {
     }
 
     try {
-      for (const entry of updates) {
-        await putJSON("/api/config", entry);
-      }
-      await loadConfig();
+      const result = await putJSON("/api/config", { updates });
+      state.config = result.configs;
       statusEl.className = "settings-status success";
       clearLibraryData();
       statusEl.textContent = "Settings saved.";

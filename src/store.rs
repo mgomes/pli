@@ -95,29 +95,43 @@ impl Store {
 
     /// Persists a setting and invalidates cached library responses atomically.
     pub async fn set(&self, key: &str, value: &str) -> Result<()> {
+        self.set_many(&[(key, value)]).await.map(|_| ())
+    }
+
+    /// Saves a settings batch in one transaction and returns the resulting configuration.
+    pub async fn set_many(&self, settings: &[(&str, &str)]) -> Result<Vec<Config>> {
         let mut db = self.db.lock().await;
         let mut tx = db.transaction().await?;
         let updated_at = Utc::now().to_rfc3339();
-        if let Some(mut config) = Config::filter(Config::fields().key().eq(key))
-            .first()
-            .exec(&mut tx)
-            .await?
-        {
-            toasty::update!(config { value, updated_at })
+        for &(key, value) in settings {
+            if let Some(mut config) = Config::filter(Config::fields().key().eq(key))
+                .first()
+                .exec(&mut tx)
+                .await?
+            {
+                toasty::update!(config {
+                    value,
+                    updated_at: &updated_at
+                })
                 .exec(&mut tx)
                 .await?;
-        } else {
-            toasty::create!(Config {
-                key,
-                value,
-                updated_at
-            })
-            .exec(&mut tx)
-            .await?;
+            } else {
+                toasty::create!(Config {
+                    key,
+                    value,
+                    updated_at: &updated_at
+                })
+                .exec(&mut tx)
+                .await?;
+            }
         }
         Cache::all().delete().exec(&mut tx).await?;
+        let configs = Config::all()
+            .order_by(Config::fields().key().asc())
+            .exec(&mut tx)
+            .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(configs)
     }
 
     /// Reads an unexpired response from the cache.
@@ -168,6 +182,49 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_settings_batch_rolls_back_every_change() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("pli.db");
+        let store = Store::open(&path).await?;
+        store.set("plex.token", "original-token").await?;
+        store.cache("recent", "[]", 60).await?;
+        let conn = rusqlite::Connection::open(&path)?;
+        conn.execute_batch(
+            "CREATE TRIGGER reject_player BEFORE UPDATE ON app_config
+            WHEN NEW.key = 'player.default' AND NEW.value = 'rejected'
+            BEGIN SELECT RAISE(ABORT, 'test write failure'); END;",
+        )?;
+        assert!(
+            store
+                .set_many(&[
+                    ("plex.token", "replacement-token"),
+                    ("player.default", "rejected")
+                ])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.get("plex.token").await?.as_deref(),
+            Some("original-token")
+        );
+        assert_eq!(store.cached("recent").await?.as_deref(), Some("[]"));
+        let configs = store
+            .set_many(&[
+                ("plex.token", "replacement-token"),
+                ("player.default", "vlc"),
+            ])
+            .await?;
+        assert!(
+            configs
+                .iter()
+                .any(|c| c.key == "plex.token" && c.value == "replacement-token")
+        );
+        assert_eq!(store.get("player.default").await?.as_deref(), Some("vlc"));
+        assert!(store.cached("recent").await?.is_none());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn preserves_go_database_and_persists_changes() -> Result<()> {

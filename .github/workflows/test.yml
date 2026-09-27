@@ -23,11 +23,32 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v7
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version-file: go.mod
-          cache: true
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check lints
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run tests
-        run: go test ./...
+        run: cargo test --locked
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
